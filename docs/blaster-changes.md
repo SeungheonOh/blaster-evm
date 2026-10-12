@@ -4,7 +4,8 @@ Blaster is vendored in [`vendor/Lean-blaster`](../vendor) (the exact upstream re
 a detailed description of every change are in
 [`vendor/UPSTREAMS.md`](../vendor/UPSTREAMS.md); the full diff is
 `vendor/Lean-blaster.patch`). All changes are general-purpose, not EVM-specific: rewrite
-rules for `Nat`, and one fix to the optimizer.
+rules for `Nat`, a fix to the optimizer, and readable counterexamples for function
+variables.
 
 1. **Bitwise operators.** Upstream unfolds `&&&`, `|||`, `^^^` into well-founded recursion
    it cannot translate. They are now opaque. A small bit-support analysis (which bit
@@ -26,6 +27,22 @@ rules for `Nat`, and one fix to the optimizer.
    rewrite `x` when `t` contains `x`, which made the optimizer loop. Solidity's ABI check
    of a `bytes4` argument produces exactly such a hypothesis, `x = 2^224 * (x / 2^224)`,
    so every `supportsInterface` ran out of memory.
+6. **Readable counterexamples for function variables.** A function variable such as the
+   chain state `world : Query → Nat` is an element of an uninterpreted sort in SMT, so
+   upstream reports it as `@@ArrowT2!val!0`. The counterexample now also lists the
+   function's values: first at the applications occurring in the query, in program
+   order, then at the other points the solver's model defines explicitly, and the value
+   everywhere else. Values are printed without `let` aliases and lists as `[a, b]`:
+
+   ```
+   - world (Evm.Query.keccak 64 [31823, 0]) = 0
+   - world (Evm.Query.storage 1) = 29654
+   - world (Evm.Query.keccak 64 [19313, 0]) = 1
+   - world (any other argument) = 29654
+   ```
+
+   (`Token`: without injectivity of keccak256, the recipient's balance slot can be the
+   slot of `totalSupply`, so a transfer changes the supply.)
 
 They come with tests in `vendor/Lean-blaster/Tests/Smt/SmtNat/SmtNatBitwise.lean`,
 including false near-miss statements the rewrites must not prove and a regression test for

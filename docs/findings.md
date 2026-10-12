@@ -32,9 +32,10 @@
   constrained bound is fine: infeasible longer paths are discharged). Gas is not modelled
   (sound for "every successful execution" properties: the model has more successful
   executions than the EVM). Callees do not re-enter. Contract creation, `DELEGATECALL`,
-  `CALLCODE`, `SELFDESTRUCT` and `EXTCODECOPY` are outside the model. Counterexamples show
-  the world as an opaque function; naming the relevant world values as variables makes
-  them visible (see `VaultBuggy`).
+  `CALLCODE`, `SELFDESTRUCT` and `EXTCODECOPY` are outside the model.
+- **Counterexamples are readable.** They list the environment and, for the world, every
+  query the execution made with the solver's answer (storage slots, hashes, call
+  outcomes), so a failing property comes with the chain state that breaks it.
 - **Trust.** As with any `blaster` call, Z3 proofs are not reconstructed: the theorems rest
   on the `Blaster.Tactic.blasterProven` axiom, i.e. on Blaster's optimiser and translation
   and on Z3. The machine is validated against the Ethereum test suites and go-ethereum

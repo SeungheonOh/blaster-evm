@@ -431,7 +431,7 @@ def getConversionFunction (fromSmtType toSmtType : SortExpr) (coDomainType : Opt
 /-- Helper function for createAppN -/
 def createAppNAux (pInfo : FunEnvInfo) (s : Sum SmtQualifiedIdent SmtTerm)
   (args : Array Expr) (termTranslator : Expr → TranslateEnvT SmtTerm)
-  (isHOF := false) : TranslateEnvT SmtTerm := do
+  (isHOF := false) (record? : Option Name := none) : TranslateEnvT SmtTerm := do
   let nbSize := if args.size < pInfo.paramsInfo.size then args.size else pInfo.paramsInfo.size
   if isHOF then
     let instType ← inferFunType pInfo.type args
@@ -462,7 +462,11 @@ def createAppNAux (pInfo : FunEnvInfo) (s : Sum SmtQualifiedIdent SmtTerm)
         let st1 ← translateType termTranslator t1
         let st2 ← translateType termTranslator t2
         let coeReturn ← if st1 == st2 then pure none else some <$> getConversionFunction st2 st1 (some t1)
-        genApplied s genArgs coeReturn
+        let app ← genApplied s genArgs coeReturn
+        -- reported with a counterexample (see `SmtEnv.funApps`)
+        if let some nm := record? then
+          modify fun env => { env with smtEnv.funApps := env.smtEnv.funApps.push (nm, genArgs, app) }
+        return app
 
   else
     let mut genArgs := #[]
@@ -551,9 +555,23 @@ def createAppNAux (pInfo : FunEnvInfo) (s : Sum SmtQualifiedIdent SmtTerm)
 @[always_inline, inline]
 def createAppN
   (f : Expr) (s : Sum SmtQualifiedIdent SmtTerm) (args : Array Expr)
-  (termTranslator : Expr → TranslateEnvT SmtTerm) (isHOF := false) : TranslateEnvT SmtTerm := do
+  (termTranslator : Expr → TranslateEnvT SmtTerm) (isHOF := false)
+  (record? : Option Name := none) : TranslateEnvT SmtTerm := do
   let pInfo ← getFunEnvInfo f
-  createAppNAux pInfo s args termTranslator isHOF
+  createAppNAux pInfo s args termTranslator isHOF record?
+
+/-- The user name of the function variable `v` when its application to `args` is to be
+    reported with a counterexample: `v` is a top-level variable and the arguments mention
+    only top-level variables (e.g. not the bound variables of a quantified hypothesis). -/
+def funAppRecordName? (v : FVarId) (args : Array Expr) : TranslateEnvT (Option Name) := do
+  let qv := (← get).smtEnv.quantifiedFVars
+  if qv.get? v != some true then return none
+  let closed := args.all fun a => !a.hasLooseBVars &&
+    (a.find? fun e => match e with
+      | .fvar w => qv.get? w != some true
+      | _ => false).isNone
+  if !closed then return none
+  return some (← v.getEnvDecl).userName
 
 /-- Given `t` corresponding the type of a function/lambda parameter:
      - return `translateType termTranslator t
@@ -1029,10 +1047,11 @@ def translateApp
          if let some r ← translateIndTypeExpr? e termTranslator then return r
          throwEnvError "translateApp: unexpected application {reprStr e}"
 
-    | Expr.fvar _ => -- case for HOF
+    | Expr.fvar v => -- case for HOF
          let .SmtIdent smtId ← translateFreeVar f termTranslator
            | throwEnvError "translateApp: SmtIdent expected for {reprStr f}"
          createAppN f (Sum.inl smtId) args termTranslator (isHOF := true)
+           (record? := ← funAppRecordName? v args)
 
     | Expr.mdata .. => -- case when f is defined as a ctor argument and is used in a ctor proposition
         match toTaggedCtorSelector? f with

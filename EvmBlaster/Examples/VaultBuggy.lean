@@ -20,9 +20,10 @@ def unlockSlot : Nat := 2
 
 /-
 Counterexample: `tx.origin = owner` but `msg.sender ≠ owner` (the owner was lured into
-calling an attacker contract, which calls `extendLock`). The world is an uninterpreted
-function, whose model Blaster does not print; naming the storage values of interest as
-variables (`owner`, `unlock`) makes them part of the counterexample.
+calling an attacker contract, which calls `extendLock`). The counterexample lists the
+world's answers to the execution's queries (e.g. `world (Evm.Query.storage 0) = …`, the
+stored owner); naming the storage values of interest (`owner`, `unlock`) states the
+property in their terms.
 -/
 #blaster (solve-result: 1) [∀ (env : Env) (world : Query → Nat) (owner unlock : Nat),
     env.WF → World.WF world →

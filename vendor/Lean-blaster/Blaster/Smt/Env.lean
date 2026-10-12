@@ -530,6 +530,94 @@ def evalTerm (t : SmtTerm) : TranslateEnvT String := do
   submitCommand (.evalTerm t)
   getOutputEval p.stdout
 
+/-- An s-expression, for printing solver values. -/
+inductive SExp where
+  | atom (s : String)
+  | list (xs : List SExp)
+
+/-- Parse the s-expressions of `toks` (tokens), returning those parsed and the remaining
+    tokens (after a closing parenthesis at depth zero, if any). -/
+partial def parseSExps : List String → List SExp × List String
+  | [] => ([], [])
+  | ")" :: rest => ([], rest)
+  | "(" :: rest =>
+    let (inner, rest') := parseSExps rest
+    let (xs, rest'') := parseSExps rest'
+    (.list inner :: xs, rest'')
+  | t :: rest => let (xs, rest') := parseSExps rest; (.atom t :: xs, rest')
+
+/-- Print an s-expression, writing lists (`List.cons a (List.cons b List.nil)`) as
+    `[a, b]`. -/
+partial def SExp.pretty : SExp → String
+  | .atom "List.nil" => "[]"
+  | .atom s => s
+  | e@(.list xs) =>
+    match listElems e with
+    | some es => "[" ++ ", ".intercalate (es.map SExp.pretty) ++ "]"
+    | none => "(" ++ " ".intercalate (xs.map SExp.pretty) ++ ")"
+ where
+  listElems : SExp → Option (List SExp)
+  | .atom "List.nil" => some []
+  | .list [.atom "List.cons", h, t] => (h :: ·) <$> listElems t
+  | _ => none
+
+partial def SExp.beq : SExp → SExp → Bool
+  | .atom a, .atom b => a == b
+  | .list xs, .list ys => xs.length == ys.length && (xs.zip ys).all fun (x, y) => x.beq y
+  | _, _ => false
+
+/-- The tokens of an s-expression text (without string literals or quoted symbols). -/
+def sexpTokens (t : String) : List String :=
+  (((t.replace "(" " ( ").replace ")" " ) ").split Char.isWhitespace).filter (· ≠ "")
+
+/-- `t` (a solver value on one line) with lists written as `[a, b]`; `t` itself when it
+    contains string literals or quoted symbols, which the tokenizer does not handle. -/
+def listSugar (t : String) : String :=
+  if t.any (fun c => c == '"' || c == '|') then t
+  else
+    match parseSExps (sexpTokens t) with
+    | (es, []) => " ".intercalate (es.map SExp.pretty)
+    | _ => t
+
+/-- Evaluate the body of a function definition of a model, with its parameters bound by
+    `env`, for the fragment the solver uses for uninterpreted functions: `ite`, `and`,
+    `or`, `not`, `=` over values. `none` outside that fragment. -/
+partial def evalModelSExp (env : List (String × SExp)) : SExp → Option SExp
+  | .atom a => some ((env.lookup a).getD (.atom a))
+  | .list [.atom "ite", c, t, e] => do
+    match ← evalModelSExp env c with
+    | .atom "true" => evalModelSExp env t
+    | .atom "false" => evalModelSExp env e
+    | _ => none
+  | .list (.atom "and" :: xs) => do
+    let vs ← xs.mapM (evalModelSExp env)
+    if vs.all (·.beq (.atom "true")) then some (.atom "true")
+    else if vs.any (·.beq (.atom "false")) then some (.atom "false") else none
+  | .list (.atom "or" :: xs) => do
+    let vs ← xs.mapM (evalModelSExp env)
+    if vs.any (·.beq (.atom "true")) then some (.atom "true")
+    else if vs.all (·.beq (.atom "false")) then some (.atom "false") else none
+  | .list [.atom "not", x] => do
+    match ← evalModelSExp env x with
+    | .atom "true" => some (.atom "false")
+    | .atom "false" => some (.atom "true")
+    | _ => none
+  | .list [.atom "=", a, b] => do
+    some (.atom (if (← evalModelSExp env a).beq (← evalModelSExp env b) then "true" else "false"))
+  | .list xs => do
+    -- a value (constructor application, negative literal): it may not mention parameters
+    if xs.any (fun x => match x with | .atom a => (env.lookup a).isSome | _ => false) then none
+    else some (.list xs)
+
+/-- The values compared with the parameter `x` in `body` (`(= x v)` or `(= v x)`): the
+    points at which a model defines a function explicitly. -/
+partial def modelPoints (x : String) (body : SExp) : List SExp :=
+  match body with
+  | .atom _ => []
+  | .list [.atom "=", .atom a, v] => if a == x then [v] else modelPoints x v
+  | .list [.atom "=", v, .atom a] => if a == x then [v] else modelPoints x v
+  | .list xs => xs.flatMap (modelPoints x)
+
 /-- Try to retrieve the model when a `sat` result is obtained and dump result to stdout.
     Do nothing when:
       - No solver instance is defined
@@ -554,9 +642,66 @@ def getModel : TranslateEnvT (List String) := do
     -- We therefore need to traverse the list in reverse order to
     -- properly display cex in the right order
     let cexArray ← Array.foldlM (λ acc vars => genCexAtStep acc vars) #[] topVars
-    return cexArray.toList
+    return (cexArray ++ (← genFunApps)).toList
 
   where
+    /-- The values of the recorded applications of top-level function variables (see
+        `SmtEnv.funApps`), e.g. `world (storage 0) = 5`: the value of a function variable
+        itself is an opaque element of an uninterpreted sort. Duplicates are dropped and at
+        most 64 applications are reported. -/
+    genFunApps : TranslateEnvT (Array String) := do
+      let oneLine (t : String) : String :=
+        listSugar (" ".intercalate ((t.split Char.isWhitespace).filter (· ≠ "")))
+      let apps := (← get).smtEnv.funApps
+      let mut seen : Std.HashSet String := {}
+      let mut out := #[]
+      -- the applications occurring in the query, in the order they were translated
+      for (nm, args, app) in apps do
+        let argStrs ← args.mapM fun a => return oneLine (← evalTerm a)
+        let key := s!"{nm} {" ".intercalate argStrs.toList}"
+        if seen.contains key then continue
+        seen := seen.insert key
+        out := out.push s!"{key} = {oneLine (← evalTerm app)}\n"
+      -- the other points at which the model defines these functions explicitly (e.g.
+      -- applications under a `let` or a quantifier of the query)
+      let mut done : Std.HashSet (String × String) := {}
+      let mut model : Option SExp := none
+      for (nm, args, app) in apps do
+        let .AppTerm applyId appArgs := app | continue
+        let some fArg := appArgs[0]? | continue
+        if args.size != 1 then continue
+        let fVal := oneLine (← evalTerm fArg)
+        let applyName := (sexpTokens s!"{SmtTerm.AppTerm applyId #[]}").getD 1 ""
+        if done.contains (applyName, fVal) then continue
+        done := done.insert (applyName, fVal)
+        if model.isNone then
+          submitCommand (.getModel)
+          let some p := (← get).smtEnv.smtProc | break
+          let text := "\n".intercalate (((← getOutputModel p.stdout) ++ ")").splitOn "\n" |>.map
+            fun l => (l.splitOn ";").headD "")
+          model := (parseSExps (sexpTokens text)).1.head?
+        let some (.list defs) := model | break
+        for d in defs do
+          let .list [.atom "define-fun", .atom n, .list [.list (.atom x0 :: _), .list (.atom x1 :: _)], _, body] := d
+            | continue
+          if n != applyName then continue
+          for v in modelPoints x1 body do
+            -- points with negative numbers come from instantiating quantified hypotheses
+            -- over the SMT integers that encode `Nat`, and are usually not values of the
+            -- Lean type: they are left out
+            if (v.pretty.splitOn "(- ").length > 1 then continue
+            let some val := evalModelSExp [(x0, .atom fVal), (x1, v)] body | continue
+            let key := s!"{nm} {v.pretty}"
+            if seen.contains key then continue
+            seen := seen.insert key
+            out := out.push s!"{key} = {val.pretty}\n"
+          -- the value everywhere else (the argument equals none of the explicit points)
+          if let some val := evalModelSExp [(x0, .atom fVal), (x1, .atom "@@other")] body then
+            out := out.push s!"{nm} (any other argument) = {val.pretty}\n"
+      if out.size > 64 then
+        out := (out.extract 0 64).push "(further applications omitted)\n"
+      return out
+
     genCexAtStep (cex : Array String) (vars : List (SmtSymbol × Name)) : TranslateEnvT (Array String) := do
       List.foldrM (λ v acc => return acc.push (← getVarValue v)) cex vars
 
@@ -644,6 +789,12 @@ def setProduceProofs (b : Bool) : TranslateEnvT Unit :=
 def setProduceModels (b : Bool) : TranslateEnvT Unit :=
   trySubmitCommand! (.setOption ":produce-models" (toString b))
 
+/-- Print values in full, without `let` aliases for shared subterms (counterexamples are
+    read by people). -/
+def setNoPrintAliases : TranslateEnvT Unit := do
+  trySubmitCommand! (.setOption ":pp.min_alias_size" "1000000")
+  trySubmitCommand! (.setOption ":pp.max_depth" "1000000")
+
 /-- Set Smt `smt.mbqi` option to `b`. -/
 def setMbqi (b : Bool) : TranslateEnvT Unit :=
   trySubmitCommand! (.setOption ":smt.mbqi" (toString b))
@@ -707,6 +858,7 @@ def setTimeout : TranslateEnvT Unit := do
 def setDefaultSmtOptions (sOpts : BlasterOptions) : TranslateEnvT Unit := do
  setPrintSuccess true
  setProduceModels true
+ setNoPrintAliases
  setProduceProofs true
  setPullNestedQuantifiers true
  setMbqi true

@@ -737,6 +737,13 @@ structure SmtEnv where
   -/
   topLevelVars : TopLevelVars
 
+  /-- Applications of top-level function variables (e.g. a chain state `w : Query → Nat`)
+      to arguments that mention only top-level variables: the function's user name, the
+      translated arguments and the translated application. Their values are reported
+      with a counterexample (see `getModel`), since the value of a function variable
+      itself is an opaque element of an uninterpreted sort. -/
+  funApps : Array (Name × Array SmtTerm × SmtTerm)
+
   /-- Cache memoizing the string representation for an Smt Symbol -/
   symbolStrCache : HashMap SmtSymbol String
 
@@ -781,6 +788,7 @@ instance : Inhabited SmtEnv where
      fvarsCache := HashMap.emptyWithCapacity,
      quantifiedFVars := HashMap.emptyWithCapacity,
      topLevelVars := Array.mkEmpty 17,
+     funApps := #[],
      symbolStrCache := HashMap.emptyWithCapacity,
      funCtorCache := HashMap.emptyWithCapacity,
      coerceCache := HashMap.emptyWithCapacity,

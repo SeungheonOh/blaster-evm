@@ -56,8 +56,21 @@ local changes against that revision.
    equals its masked self, `x = x &&& m`, which normalises to `x = 2^224 * (x / 2^224)`.
    Symbolic execution of any `supportsInterface(bytes4)` exhausted the memory. Such
    equalities are no longer used as rewrites (they remain hypotheses).
-6. **Tests**: `Tests/Smt/SmtNat/SmtNatBitwise.lean` covers these changes, including false
-   near-miss statements that the rewrites must not prove.
+6. **Counterexamples for function variables** (`Blaster/Smt/Env.lean`,
+   `Blaster/Smt/Translate/Application.lean`, `SmtEnv.funApps`). A function variable is an
+   element of an uninterpreted sort (`@@ArrowTn`) applied through `@apply`, so upstream
+   reports it as an opaque value such as `@@ArrowT2!val!0`. Applications of top-level
+   function variables to arguments over top-level variables are now recorded during the
+   translation; after a `sat` result their arguments and values are evaluated and listed
+   (`world (Evm.Query.storage 1) = 29654`). The solver's model of the `@apply` function is
+   then read, and its other explicit points (e.g. applications under a `let`) and its
+   default value are listed too, by evaluating the definition (`ite`, `and`, `or`, `not`,
+   `=` only; anything else is skipped). Points with negative numbers, which come from
+   instantiating quantifiers over the integers encoding `Nat`, are left out. Values are
+   printed without `let` aliases (`pp.min_alias_size`, `pp.max_depth`) and lists as
+   `[a, b]`.
+7. **Tests**: `Tests/Smt/SmtNat/SmtNatBitwise.lean` covers the rewriting changes, including
+   false near-miss statements that the rewrites must not prove.
 
 ## Rebuilding the plugin
 
