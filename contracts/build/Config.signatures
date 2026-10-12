@@ -1,0 +1,14 @@
+Function signatures:
+ddca3f43: fee()
+01f59d16: maxFee()
+8da5cb5b: owner()
+69fe0e2d: setFee(uint256)
+f2fde38b: transferOwnership(address)
+
+Error signatures:
+cd4e6167: FeeTooHigh()
+30cd7471: NotOwner()
+d92e233d: ZeroAddress()
+
+Event signatures:
+5fc463da23c1b063e66f9e352006a7fbe8db7223c455dc429e881a2dfe2f94f1: FeeChanged(uint256,uint256)

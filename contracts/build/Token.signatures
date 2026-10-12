@@ -1,0 +1,13 @@
+Function signatures:
+70a08231: balanceOf(address)
+40c10f19: mint(address,uint256)
+07546172: minter()
+18160ddd: totalSupply()
+a9059cbb: transfer(address,uint256)
+
+Error signatures:
+f4d678b8: InsufficientBalance()
+f8d2906c: NotMinter()
+
+Event signatures:
+ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef: Transfer(address,address,uint256)

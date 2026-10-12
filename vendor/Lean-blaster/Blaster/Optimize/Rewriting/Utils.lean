@@ -1,0 +1,762 @@
+import Lean
+import Blaster.Optimize.Telescope
+
+open Lean Meta Declaration
+
+namespace Blaster.Optimize
+
+/-- Return `true` if `n` corresponds to an unsafe definition
+    (e.g, partial recursive function, partial inductive predicate, etc). -/
+def isUnsafeDef (n : Name) : TranslateEnvT Bool :=
+ return (← getConstEnvInfo n).isUnsafe
+
+/-- Return `true` if e corresponds to an enumerator constructor (i.e., constructor without any parameters).
+-/
+@[always_inline, inline]
+def isEnumConst (e : Expr) : TranslateEnvT Bool := do
+  match e with
+  | Expr.const n _ =>
+      let ConstantInfo.ctorInfo info ← getConstEnvInfo n | return false
+      return (info.numFields == 0 && info.numParams == 0 && !info.type.isProp)
+  | _ => return false
+
+/-- Return `true` if e corresponds to a nullary constructor or a fully applied parametric constructor.
+-/
+@[always_inline, inline]
+def isFullyAppliedConst (e : Expr) : TranslateEnvT Bool := do
+ match e.getAppFn' with
+ | Expr.const n _ =>
+     let ConstantInfo.ctorInfo info ← getConstEnvInfo n | return false
+     -- should be fully applied
+     -- numFields corresponds to the constructor parameters
+     -- numParams corresponds to the Inductive type parameters
+     return (e.getAppNumArgs' == info.numFields + info.numParams && !info.type.isProp)
+ | _ => return false
+
+/-- Return `true` if e corresponds to a constructor that may contain free or bounded variables. -/
+@[always_inline, inline]
+def isConstructor (e : Expr) : TranslateEnvT Bool :=
+  if e.isLit then return true
+  else isEnumConst e <||> isFullyAppliedConst e
+
+@[always_inline, inline]
+def isNormNatConstr (e : Expr) : Bool :=
+  match e with
+  | Expr.app (Expr.app (Expr.const ``Nat.add _) (Expr.lit _)) _ => true
+  | _ => false
+
+@[always_inline, inline]
+def isNormIntConstr (e : Expr) : Bool :=
+  match e with
+  | Expr.app (Expr.const ``Int.neg _)
+    (Expr.app (Expr.const ``Int.ofNat _)
+    (Expr.app (Expr.app (Expr.const ``Nat.add _) (Expr.lit _)) _)) => true
+  | _ => false
+
+/-- Return `true` if the given type expression `t` (e.g., obtained via `inferType`)
+    satisfy the following:
+      - `t :=  α₁ → ... → αₙ`
+    Assumes that `t` is not a Prop.
+-/
+def isFunType' (t : Expr) : Bool :=
+  if t.isForall then true
+  else match autoParam? t with  -- considering case where function is wrapped in an autoParam arg
+       | some (t', _tactic) => t'.isForall
+       | _ => false
+
+/-- Return `true` if the given type expression `t` (e.g., obtained via `inferType`)
+    satisfy the following:
+      - ¬ isProp t
+      - `t :=  α₁ → ... → αₙ`
+-/
+def isFunType (t : Expr) : TranslateEnvT Bool := do
+  if (← isPropEnv t) then return false
+  else return isFunType' t
+
+/-- Quick function determining if a given expression `e` is a function. -/
+@[always_inline, inline]
+def isFunExpr (e : Expr) : TranslateEnvT Bool := do
+ match e with
+ | Expr.lam .. => return true
+ | Expr.fvar fv => return isFunType' (← fv.getEnvType)
+ | Expr.const n _ =>
+      let cInfo ← getConstEnvInfo n
+      return isFunType' cInfo.type
+ | Expr.app .. =>
+     let (f', args') := getAppFnWithArgs e
+     let fInfo ← getFunEnvInfo f'
+     return isFunType' (← inferAppType fInfo.type args')
+ | Expr.proj .. =>
+     if e.hasMVar
+     then return false
+     else return isFunType' (← inferTypeEnv e)
+ | _ => return false
+
+/-- Return `true` if e corresponds to a structure ctor (e.g. String.mk) -/
+@[always_inline, inline]
+def isStructureCtorExpr (e : Expr) : TranslateEnvT Bool := do
+  match e.getAppFn' with
+  | Expr.const n _ => isStructureCtorEnv n
+  | _ => return false
+
+/-- Return `true` if e corresponds to a fully applied structure
+    with each argument aᵢ satisfying one of the following conditions:
+      - isStructureCtorExpr aᵢ ∧ isFullyAppliedStructureAux aᵢ
+      - ¬ isStructureCtorExpr aᵢ ∧ (isNormConstructorBase aᵢ ∨ isProp aᵢ ∨ isFunExpr aᵢ)
+    Assumes that `e` satisfies `isStructureCtorExpr e ∧ isFullyAppliedConst e`.
+-/
+@[always_inline, inline]
+partial def isFullyAppliedStructure (e : Expr) : TranslateEnvT Bool := do
+  let pInfo ← getFunEnvInfo e.getAppFn'
+  let rec go (xs : List (Expr × ParamInfo)) : TranslateEnvT Bool := do
+    match xs with
+    | [] => return true
+    | (cur, p) :: xs' =>
+      if (← isStructureCtorExpr cur <&&> isFullyAppliedConst e) then
+        let pInfo' ← getFunEnvInfo cur.getAppFn'
+        go (getArgs cur (pInfo'.paramsInfo.size - 1) pInfo'.paramsInfo xs')
+      else if ← isNormConstructorBase cur <||> pure p.isProp <||> isFunExpr cur then go xs'
+      else return false
+  go (getArgs e (pInfo.paramsInfo.size - 1) pInfo.paramsInfo [])
+
+where
+  getArgs (e : Expr) (idx : Nat) (paramsInfo : Array ParamInfo) (acc : List (Expr × ParamInfo)) : List (Expr × ParamInfo) :=
+    match e with
+    | Expr.app f a => getArgs f (idx - 1) paramsInfo ((a, paramsInfo[idx]!) :: acc)
+    | _ => acc
+
+  @[always_inline, inline]
+  isNormConstructorBase (e : Expr)  : TranslateEnvT Bool := do
+   if ← isConstructor e then return true
+   else return isNormNatConstr e || isNormIntConstr e || isPropCtor e
+
+@[always_inline, inline]
+def isNormConstructor (e : Expr) (patternMatch := false) : TranslateEnvT Bool := do
+  if ← isPatternConstructor e then return true
+  else return isNormNatConstr e || isNormIntConstr e || isPropCtor e
+
+ where
+   isPatternConstructor (e : Expr) : TranslateEnvT Bool := do
+     if ← isConstructor e then
+       if patternMatch || !(← isStructureCtorExpr e) then return true
+       else isFullyAppliedStructure e
+     else return false
+
+/-- Return `true` if e corresponds to a constructor applied to only constant values (e.g., no free or bounded variables). -/
+@[always_inline, inline]
+def isConstant (e : Expr) : TranslateEnvT Bool :=
+  isConstructor e <&&> (pure !(hasVars e))
+
+/-- Return `true` only e is either a normalized ctor or is present in the isCtorMatchPropCache. -/
+@[always_inline, inline]
+def isCstIteMatch (e : Expr) : TranslateEnvT Bool := do
+  if (← isNormConstructor e) then return true
+  else return (← get).optEnv.memCache.isCtorMatchPropCache.contains e
+
+/-- Return `true` only when e is either a normalized Blaster.dite/match expression. -/
+@[always_inline, inline]
+def isIteOrMatch (e : Expr) : TranslateEnvT Bool :=
+  if (dite'? e).isSome then return true
+  else match e with
+       | Expr.app f (.lam ..) => return (← isMatcher? f.getAppFn).isSome
+       | _ => return false
+
+
+/-- Return `true` if `c` corresponds to a nullary constructor. -/
+def isNullaryCtor (c : Name) : TranslateEnvT Bool := do
+  match (← getConstEnvInfo c) with
+  | ConstantInfo.ctorInfo info =>
+      -- numFields corresponds to the constructor parameters
+      pure (info.numFields == 0 && !info.type.isProp)
+  | _ => pure false
+
+/-- Return `true` if `t` is not a Prop and corresponds to one of the following:
+    - is a sort type only when `existQuantifier` flag is not set.
+    - is prop type when `existQuantifier` flag is set.
+    - is a class constraint; or
+    - is an inductive type for which either at least one nullary constructor or an Inhabited instance exists.
+ TODO: extends check to also consider parametric constructor for which each parameter type satisfy `isSortOrInhabited`.
+-/
+def isSortOrInhabited (t : Expr) (existsQuantifier := false) : TranslateEnvT Bool := do
+ match ← inferTypeEnv t with
+ | Expr.sort u =>
+      if u.isAlwaysZero then return false
+      match t.getAppFn' with
+      | Expr.const n _ =>
+          if (← isClassConstraint n) then return true -- break if class constraint
+          else match (← getConstEnvInfo n) with
+               | ConstantInfo.inductInfo indVal =>
+                   for ctorName in indVal.ctors do
+                     -- inductive type has at least one nullary constructor
+                     if (← isNullaryCtor ctorName) then return true
+                   -- check if InHabited instance exists for t
+                   hasInhabitedInstance t
+               | _ => isSortType t
+      | _ => isSortType t
+ | _ => return false
+
+ where
+   isSortType (t : Expr) : TranslateEnvT Bool :=
+     if existsQuantifier then return t.isProp
+     else return true
+
+/-- Return `! e` when `b = false`. Otherwise return `e`. -/
+def toBoolNotExpr (b : Bool) (e : Expr) : TranslateEnvT Expr := do
+  if b
+  then return e
+  else mkAppExpr (← mkBoolNotOp) e
+
+
+/-- Inductive type used to characterize Nat binary operators when
+    at least one operand is a constant.
+    This type is exclusively used by function `toNatCstOpExpr?`
+-/
+inductive NatCstOpInfo where
+  /-- Nat.add N e info. -/
+  | NatAddExpr (n : Nat) (e : Expr) : NatCstOpInfo
+  /-- Nat.sub N e info. -/
+  | NatSubLeftExpr (n : Nat) (e : Expr) : NatCstOpInfo
+  /-- Nat.sub e N info. -/
+  | NatSubRightExpr (e : Expr) (n : Nat)  : NatCstOpInfo
+  /-- Nat.mul N e info. -/
+  | NatMulExpr (n : Nat) (e : Expr) : NatCstOpInfo
+  /-- Nat.div N e info. -/
+  | NatDivLeftExpr (n : Nat) (e : Expr) : NatCstOpInfo
+  /-- Nat.div e N info. -/
+  | NatDivRightExpr (e : Expr) (n : Nat) : NatCstOpInfo
+  /-- Nat.mod N e info. -/
+  | NatModLeftExpr (n : Nat) (e : Expr) : NatCstOpInfo
+  /-- Nat.mod e N info. -/
+  | NatModRightExpr (e : Expr) (n : Nat) : NatCstOpInfo
+
+
+/-- Return a `NatCstOpInfo` for `e` according to the following rules:
+    - NatAddExpr N n (if e := Nat.add N n)
+    - NatSubLeftExpr N n (if e := Nat.sub N n)
+    - NatSubRightExpr n N (if e := Nat.sub n N)
+    - NatMulExpr N n (if e := Nat.mul N n)
+    - NatDivLeftExpr N n (if e := Nat.div N n)
+    - NatDivLeftExpr n N (if e := Nat.div n N)
+    - NatModLeftExpr N n (if e := Nat.mod N n)
+    - NatModRightExpr n N (if e := Nat.mod n N)
+
+    Return `none` when `e` is not a full applied Nat binary operator.
+    Assume that operands have already been reordered for commutative operators.
+-/
+def toNatCstOpExpr? (e: Expr) : Option NatCstOpInfo :=
+ match binOp? e with
+ | some (f, op1, op2) =>
+    match f, (isNatValue? op1), (isNatValue? op2) with
+    | Expr.const ``Nat.add _, some n, _ => some (NatCstOpInfo.NatAddExpr n op2)
+    | Expr.const ``Nat.sub _, some n, _ => some (NatCstOpInfo.NatSubLeftExpr n op2)
+    | Expr.const ``Nat.sub _, _, some n => some (NatCstOpInfo.NatSubRightExpr op1 n)
+    | Expr.const ``Nat.mul _, some n, _ => some (NatCstOpInfo.NatMulExpr n op2)
+    | Expr.const ``Nat.div _, some n, _ => some (NatCstOpInfo.NatDivLeftExpr n op2)
+    | Expr.const ``Nat.div _, _, some n => some (NatCstOpInfo.NatDivRightExpr op1 n)
+    | Expr.const ``Nat.mod _, some n, _ => some (NatCstOpInfo.NatModLeftExpr n op2)
+    | Expr.const ``Nat.mod _, _, some n => some (NatCstOpInfo.NatModRightExpr op1 n)
+    | _, _, _ => none
+ | _ => none
+
+
+/-- Inductive type used to characterize Int binary operators when
+    at least one operand is a constant.
+    This type is exclusively used by function `toIntCstOpExpr?`
+-/
+inductive IntCstOpInfo where
+  /-- Int.add N e info. -/
+  | IntAddExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.mul N e info. -/
+  | IntMulExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.tdiv N e info. -/
+  | IntTDivLeftExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.tdiv e N info. -/
+  | IntTDivRightExpr (e : Expr) (n : Int) : IntCstOpInfo
+  /-- Int.tmod N e info. -/
+  | IntTModLeftExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.tmod e N info. -/
+  | IntTModRightExpr (e : Expr) (n : Int) : IntCstOpInfo
+  /-- Int.ediv N e info. -/
+  | IntEDivLeftExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.ediv e N info. -/
+  | IntEDivRightExpr (e : Expr) (n : Int) : IntCstOpInfo
+  /-- Int.emod N e info. -/
+  | IntEModLeftExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.emod e N info. -/
+  | IntEModRightExpr (e : Expr) (n : Int) : IntCstOpInfo
+  /-- Int.fdiv N e info. -/
+  | IntFDivLeftExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.fdiv e N info. -/
+  | IntFDivRightExpr (e : Expr) (n : Int) : IntCstOpInfo
+  /-- Int.fmod N e info. -/
+  | IntFModLeftExpr (n : Int) (e : Expr) : IntCstOpInfo
+  /-- Int.fmod e N info. -/
+  | IntFModRightExpr (e : Expr) (n : Int) : IntCstOpInfo
+  /-- Int.neg (Int.add N e).  -/
+  | IntNegAddExpr (n : Int) (e : Expr) : IntCstOpInfo
+
+
+/-- Return a `IntCstOpInfo` for `e` according to the following rules:
+    - IntAddExpr N n (if e := Int.add N n)
+    - IntMulExpr N n (if e := Int.mul N n)
+    - IntTDivLeftExpr N n (if e := Int.tdiv N n)
+    - IntTDivLeftExpr n N (if e := Int.tdiv n N)
+    - IntTModLeftExpr N n (if e := Int.tmod N n)
+    - IntTModRightExpr n N (if e := Int.tmod n N)
+    - IntEDivLeftExpr N n (if e := Int.ediv N n)
+    - IntEDivLeftExpr n N (if e := Int.ediv n N)
+    - IntEModLeftExpr N n (if e := Int.emod N n)
+    - IntEModRightExpr n N (if e := Int.emod n N)
+    - IntFDivLeftExpr N n (if e := Int.fdiv N n)
+    - IntFDivLeftExpr n N (if e := Int.fdiv n N)
+    - IntFModLeftExpr N n (if e := Int.fmod N n)
+    - IntFModRightExpr n N (if e := Int.fmod n N)
+    - IntNegAddExpr N n (if e := Int.neg (Int.add N n))
+
+    Return `none` when e is not a full applied Int binary operator.
+    Assume that operands have already been reordered for commutative operators.
+-/
+def toIntCstOpExpr? (e: Expr) : Option IntCstOpInfo := do
+ match intNeg? e with
+ | some op =>
+    match intAdd? op with
+    | some (op1, op2) =>
+         match (isIntValue? op1) with
+         | some n => some (IntCstOpInfo.IntNegAddExpr n op2)
+         | _ => none
+    | _ => none
+ | none =>
+    match binOp? e with
+    | some (f, op1, op2) =>
+       match f, (isIntValue? op1), (isIntValue? op2) with
+       | Expr.const ``Int.add _, some n, _ => some (IntCstOpInfo.IntAddExpr n op2)
+       | Expr.const ``Int.mul _, some n, _ => some (IntCstOpInfo.IntMulExpr n op2)
+       | Expr.const ``Int.tdiv _, some n, _ => some (IntCstOpInfo.IntTDivLeftExpr n op2)
+       | Expr.const ``Int.tdiv _, _, some n => some (IntCstOpInfo.IntTDivRightExpr op1 n)
+       | Expr.const ``Int.tmod _, some n, _ => some (IntCstOpInfo.IntTModLeftExpr n op2)
+       | Expr.const ``Int.tmod _, _, some n => some (IntCstOpInfo.IntTModRightExpr op1 n)
+       | Expr.const ``Int.ediv _, some n, _ => some (IntCstOpInfo.IntEDivLeftExpr n op2)
+       | Expr.const ``Int.ediv _, _, some n => some (IntCstOpInfo.IntEDivRightExpr op1 n)
+       | Expr.const ``Int.emod _, some n, _ => some (IntCstOpInfo.IntEModLeftExpr n op2)
+       | Expr.const ``Int.emod _, _, some n => some (IntCstOpInfo.IntEModRightExpr op1 n)
+       | Expr.const ``Int.fdiv _, some n, _ => some (IntCstOpInfo.IntFDivLeftExpr n op2)
+       | Expr.const ``Int.fdiv _, _, some n => some (IntCstOpInfo.IntFDivRightExpr op1 n)
+       | Expr.const ``Int.fmod _, some n, _ => some (IntCstOpInfo.IntFModLeftExpr n op2)
+       | Expr.const ``Int.fmod _, _, some n => some (IntCstOpInfo.IntFModRightExpr op1 n)
+       | _, _, _ => none
+    | none => none
+
+@[always_inline, inline]
+def swapOnCond (cond : Bool) (e1 e2 : Expr) : Expr × Expr :=
+  if cond then (e2, e1) else (e1, e2)
+
+@[always_inline, inline]
+private def reorderCommon (e1 : Expr) (e2 : Expr) : Expr × Expr :=
+ if (isTaggedRecursiveCall e1) && !(isTaggedRecursiveCall e2) then (e2, e1)
+ else if e2.lt e1 then (e2, e1)
+ else (e1, e2)
+
+/-- Reorder operands for commutative Bool operators as follows:
+     - #[``false, _] ===> args
+     - #[e,``false] ===> #[``false, e]
+     - #[``true, _] ===> args
+     - #[e ``true] ===> #[``true, e]
+     - #[fvar id1, fvar id2] ===> #[fvar id2, fvar id1] (if id2.name < id1.name)
+     - #[fvar _, _] ===> args
+     - #[e, fvar id] ===> #[fvar id, e]
+     - #[e1, e2] ===> #[e2, e1] (if isTaggedRecursiveCall e1 ∧ ¬ (isTaggedRecursiveCall e2))
+     - #[e1, e2] ===> #[e2, e1] (if e2 < e1)
+     - #[not e, e] ===> #[e, not e]
+     - #[e1, e2] ===> args
+    Assume that args.size = 2
+-/
+@[always_inline, inline]
+def reorderBoolOp (args: Array Expr) : (Expr × Expr) :=
+  let e1 := args[0]!
+  let e2 := args[1]!
+  match e1, e2 with
+  | Expr.const ``false _, _ => (e1, e2)
+  | _, Expr.const ``false _ => (e2, e1)
+  | Expr.const ``true _, _ => (e1, e2)
+  | _, Expr.const ``true _ => (e2, e1)
+  | Expr.fvar _, Expr.fvar _ => swapOnCond (e2.lt e1) e1 e2
+  | Expr.fvar _, _ => (e1, e2)
+  | _, Expr.fvar _ => (e2, e1)
+  | _, _ =>
+    let (e1', e2') := reorderCommon e1 e2
+    if isBoolNotExprOf e1' e2' then (e2', e1') else (e1', e2')
+
+/-- Reorder operands for commutative Prop operators as follows:
+     - #[``False, _] ===> args
+     - #[e,``False] ===> #[``False, e]
+     - #[True, _] ===> args
+     - #[e ``True] ===> #[``True, e]
+     - #[fvar id1, fvar id2] ===> #[fvar id2, fvar id1] (if id2.name < id1.name)
+     - #[fvar _, _] ===> args
+     - #[e, fvar _] ===> #[fvar _, e]
+     - #[¬ e, e] ===> #[e, ¬ e]
+     - #[false = c, true = c] ===> #[true = c, false = c]
+     - #[e1 -> e2, e1] ===> #[e1, e1 -> e2]
+     - #[e1, e2] ===> #[e2, e1] (if isTaggedRecursiveCall e1 ∧ ¬ (isTaggedRecursiveCall e2))
+     - #[e1, e2] ===> #[e2, e1] (if e2 < e1)
+     - #[e1, e2] ===> args
+    Assume that args.size = 2
+-/
+@[always_inline, inline]
+def reorderPropOp (args: Array Expr) : (Expr × Expr) :=
+  let e1 := args[0]!
+  let e2 := args[1]!
+  match e1, e2 with
+  | Expr.const ``False _, _ => (e1, e2)
+  | _, Expr.const ``False _ => (e2, e1)
+  | Expr.const ``True _, _ => (e1, e2)
+  | _, Expr.const ``True _ => (e2, e1)
+  | Expr.fvar _, Expr.fvar _ => swapOnCond (e2.lt e1) e1 e2
+  | Expr.fvar _, _ => (e1, e2)
+  | _, Expr.fvar _ => (e2, e1)
+  | _, _ =>
+     let (e1', e2') := reorderCommon e1 e2
+     if isNotExprOf e1' e2' then (e2', e1')
+     else if isNegBoolEqOf e1' e2' then (e2', e1')
+     else if e1'.isForall && !e2'.isForall then (e2', e1')
+     else (e1', e2')
+
+/-- Reorder operands for `Eq` operators by applying `reorderPropOp` first and followed by
+    the rules:
+     - #[Expr.lit _, _] ===> args
+     - #[e, Expr.lit l] ===> #[Expr.lit l, e]
+     - #[e1, e2] ===> args (if isConstructor e1) -- already ordered by reorderPropOp
+     - #[e1, e2] ===> #[e2, e1] (if isConstructor e2)
+     - #[e1, e2] ===> args
+    Assume that args.size = 2
+    NOTE: Precedence is applied according to the order in which the rules have been specified.
+-/
+@[always_inline, inline]
+def reorderEq (args : Array Expr) : TranslateEnvT (Expr × Expr) := do
+ let r@(e1, e2) := reorderPropOp args
+ match e1, e2 with
+ | Expr.lit _, _ => return r
+ | _, Expr.lit _ => return (e2, e1)
+ | _, _ =>
+   if (← isConstructor e1) then return r
+   if (← isConstructor e2) then return (e2, e1)
+   if isBoolNotExprOf e1 e2 then return (e2, e1)
+   return r
+
+/-- Reorder operands for commutative `Int` operators as follows:
+    - #[N1, N2] ===> args
+    - #[N, e] ===> args
+    - #[e, N] ===> #[N, e]
+    - #[fvar id1, fvar id2] ===> #[fvar id2, fvar id1] (if id2.name < id1.name)
+    - #[fvar _, _] ===> args
+    - #[e, fvar _] ===> #[fvar _, e]
+    - #[(Nat.sub x y), (Nat.add p q)] ===> #[Nat.add p q, Nat.sub x y]
+    - #[(Nat.pow x y), e] ===> #[e, Nat.pow x y] if ¬ (isNatPowExpr e)
+    - #[e1, e2] ===> #[e2, e1] (if isTaggedRecursiveCall e1 ∧ ¬ (isTaggedRecursiveCall e2))
+    - #[e1, e2] ===> #[e2, e1] (if e2 < e1)
+    - #[e1, e2] ===> args
+    Assume that args.size = 2
+-/
+@[always_inline, inline]
+def reorderNatOp (args: Array Expr) : (Expr × Expr) :=
+  let e1 := args[0]!
+  let e2 := args[1]!
+  match isNatValue e1, isNatValue e2 with
+  | true, _ => (e1, e2)
+  | _, true => (e2, e1)
+  | _, _ =>
+    match e1, e2 with
+    | Expr.fvar _, Expr.fvar _ => swapOnCond (e2.lt e1) e1 e2
+    | Expr.fvar _, _ => (e1, e2)
+    | _, Expr.fvar _ => (e2, e1)
+    | _, _ =>
+      let (e1', e2') := reorderCommon e1 e2
+      if (isNatSubExpr e1' && isNatAddExpr e2') then (e2', e1')
+      else if (isNatPowExpr e1' && !isNatPowExpr e2') then (e2', e1')
+      else (e1', e2')
+
+/-- Reorder operands for commutative `Int` operators as follows:
+    - #[N1, N2] ===> args
+    - #[N, e] ===> args
+    - #[e, N] ===> #[N, e]
+    - #[fvar id1, fvar id2] ===> #[fvar id2, fvar id1] (if id2.name < id1.name)
+    - #[fvar _, _] ===> args
+    - #[e, fvar _] ===> #[fvar _, e]
+    - #[(Int.pow x y), e] ===> #[e, Int.pow x y] if ¬ (isIntPowExpr e)
+    - #[Int.neg x, x] ===> #[x, Int.neg x]
+    - #[e1, e2] ===> #[e2, e1] (if isTaggedRecursiveCall e1 ∧ ¬ (isTaggedRecursiveCall e2))
+    - #[e1, e2] ===> #[e2, e1] (if e2 < e1)
+    - #[e1, e2] ===> args
+    Assume that args.size = 2
+-/
+@[always_inline, inline]
+def reorderIntOp (args: Array Expr) : (Expr × Expr) :=
+  let e1 := args[0]!
+  let e2 := args[1]!
+  match isIntValue e1, isIntValue e2 with
+  | true, _ => (e1, e2)
+  | _, true => (e2, e1)
+  | _, _ =>
+    match e1, e2 with
+    | Expr.fvar _, Expr.fvar _ => swapOnCond (e2.lt e1) e1 e2
+    | Expr.fvar _, _ => (e1, e2)
+    | _, Expr.fvar _ => (e2, e1)
+    | _, _ =>
+      let (e1', e2') := reorderCommon e1 e2
+      if (isIntPowExpr e1' && !isIntPowExpr e2') then (e2', e1')
+      else if isIntNegExprOf e1' e2' then (e2', e1')
+      else (e1', e2')
+
+/-- Reorder operands for commutative operators -/
+def reorderOperands (f : Expr) (args : Array Expr) : TranslateEnvT (Array Expr) := do
+  let Expr.const n _ := f | return args
+  match n with
+  | ``Nat.add
+  | ``Nat.mul
+  | ``Nat.land
+  | ``Nat.lor
+  | ``Nat.xor =>
+       if args.size != 2 then return args
+       let (op1, op2) := reorderNatOp args
+       return #[op1, op2]
+
+  | ``Int.add
+  | ``Int.mul =>
+       if args.size != 2 then return args
+       let (op1, op2) := reorderIntOp args
+       return #[op1, op2]
+
+  | ``Eq =>
+       if args.size != 3 then return args
+       let (op1, op2) ← reorderEq #[args[1]!, args[2]!]
+       return (args.set! 1 op1).set! 2 op2
+
+  | ``BEq.beq =>
+      if !(← isOpaqueRelational n args) then return args
+      if args.size != 4 then return args
+      let (op1, op2) := reorderBoolOp #[args[2]!, args[3]!]
+      return (args.set! 2 op1).set! 3 op2
+
+  | ``and
+  | ``or =>
+       if args.size != 2 then return args
+       let (op1, op2) := reorderBoolOp args
+       return #[op1, op2]
+
+  | ``And
+  | ``Or =>
+       if args.size != 2 then return args
+       let (op1, op2) := reorderPropOp args
+       return #[op1, op2]
+
+  | _ => return args
+
+/-- Return `true` if `e` corresponds t a casesOn function. -/
+def isCasesOnRec (e : Expr) : TranslateEnvT Bool := do
+  match e with
+  | Expr.const n _ => return isCasesOnRecursor (← getEnv) n
+  | _ => return false
+
+/-- Return `true` if `e` corresponds to a match or casesOn function. -/
+@[always_inline, inline]
+def isMatchExpr (e : Expr) : TranslateEnvT Bool := do
+  match e with
+  | Expr.const n l => Option.isSome <$> getMatcherRecInfo? n l
+  | _ => return false
+
+/- Return the function definition for `f` whenever `f` corresponds to:
+   - a lambda expression
+   - a defined function (recursive or not).
+   Otherwise `none`.
+   Assumes that `f` cannot be one of the following:
+     - an instance class;
+     - a match function;
+     - a class constraint.
+-/
+def getFunBodyAux? (f : Expr) : TranslateEnvT (Option Expr) := do
+  match f with
+  | Expr.lam .. => return f
+  | Expr.const n l =>
+      if (← isRecursiveFun n)
+      then
+        let some eqThm ← getUnfoldEqnFor? n
+          | throwEnvError "getFunBody: equation theorem expected for {n}"
+        Meta.forallTelescope ((← getConstEnvInfo eqThm).type) fun xs eqn => do
+          let some (_, _, fbody) := eq? eqn
+            | throwEnvError "getFunBody: equation expected but got {reprStr eqn}"
+          let auxApp ← mkLambdaFVars xs fbody
+          let cinfo ← getConstEnvInfo n
+          hashcons (auxApp.instantiateLevelParams cinfo.levelParams l)
+      else
+        if let cInfo@(ConstantInfo.defnInfo _) ← getConstEnvInfo n
+        then hashcons (← instantiateValueLevelParams cInfo l)
+        else return none
+
+  | Expr.proj .. =>
+       -- case when f is a function defined in a class instance
+       let some e ← reduceEnvProj? f | return none
+       hashcons e
+
+  | _ => return none
+
+
+/-- Same as getFunBodyAux? but cache result -/
+@[always_inline, inline]
+def getFunBody (f : Expr) : TranslateEnvT (Option Expr) := do
+  match (← get).optEnv.memCache.getFunBodyCache.get? f with
+  | some m => return m
+  | none =>
+       let body ← getFunBodyAux? f
+       updateFunBodyCache f body
+       return body
+
+/-- Return `true` if `e` corresponds to an undefined type class function application, s.t.:
+      - `e := app (Expr.proj c _ _) ...`; and
+      - `c` is the name of a type class in the given environment; and
+      - `Expr.proj c _ _` cannot be reduced.
+-/
+def isUndefinedClassFunApp (e : Expr) : TranslateEnvT Bool := do
+  match e.getAppFn' with
+  | p@(Expr.proj c _ _) => return ((← reduceEnvProj? p).isNone && (← isClassConstraint c))
+  | _ => return false
+
+/-- Return `true` only when `e := Expr.const n l` and one of the following condition is satisfied:
+     - `n := namedPattern`; or
+     - `n` is a class instance; or
+     - `n` is a match expression; or
+     - `n` is a class constraint; or
+     - `n` is an opaque/axiom that does not have a function type; or
+     - `n` is an inductive datatype ∧ n ∉ opaqueFuns; or
+     - `n` is a theorem; or
+     - `n` is a ctor; or
+-/
+def isNotFunAux (e : Expr) : TranslateEnvT Bool := do
+ let Expr.const n _ := e | return false
+ if n == ``namedPattern then return true
+ if opaqueFuns.contains n then return false -- consider Eq/And/Or case
+ match (← getConstEnvInfo n) with
+ | .defnInfo _ =>
+        if (← isInstanceClass n) then return true
+        if (← isMatchExpr e) then return true
+        isClassConstraint n
+ | .opaqueInfo _
+ | .axiomInfo _ => return (← inferTypeEnv e).isForall
+ | _ => return true
+
+/-- Same as isNotFunAux but caches the result. -/
+@[always_inline, inline]
+def isNotFun (e : Expr) : TranslateEnvT Bool := do
+ match (← get).optEnv.memCache.isNotFunCache.get? e with
+ | some b => return b
+ | none =>
+      let b ← isNotFunAux e
+      updateIsNotFunCache e b
+      return b
+
+
+/-- Return `true` only when `e := Expr.const n l` and one of the following condition is satisfied:
+     - `n` is not tagged as an opaque definition;
+     - `n` is not a recursive function;
+     - `n` is not an axiom/opaque definition;
+    Assumes that `e` does not satisfy predicate isNotFun
+-/
+def isNotFoldable
+  (e : Expr) (args : Array Expr) : TranslateEnvT Bool := do
+  match e with
+  | Expr.const n _ =>
+      if opaqueFuns.contains n then return true
+      else if (← (pure (args.size != 0)) <&&> (isOpaqueRelational n args)) then return true
+      else isRecursiveFun n <||> isAxiomOrOpaque n
+  | _ => return false
+
+
+/-- Unfold fuction `f` w.r.t. the effective parameters `args` only when:
+     - f is not a constructor
+     - f is not tagged as an opaque definition
+     - f is not a recursive function
+     - f is not a class constraint
+     - f is not an undefined type class function
+     - f is not a match application
+-/
+def getUnfoldFunDef? (f: Expr) (args: Array Expr) : TranslateEnvT (Option BetaLambdaResult) := do
+ if (← isNotFoldable f args) then return none
+ match ← getFunBody f with
+ | some fbody =>
+    let betaRes ← betaLambdaEnv fbody args
+    let reduced := betaRes.betaReduced
+    if (← isUndefinedClassFunApp reduced)
+    then return none
+    else
+      -- check if reduced application is an instance class function
+      let f' := reduced.getAppFn'
+      if Expr.isProj f' then
+        match ← getFunBody (← instantiateSharedMVars f') with
+        | some fbody' =>
+           let betaRes' ← betaLambdaEnv fbody' reduced.getAppArgs
+           return some { betaRes' with prevMVarIdDecls := betaRes.prevMVarIdDecls ++ betaRes'.prevMVarIdDecls}
+        | none => return betaRes -- structure projection case
+      else return betaRes
+ | none => return none
+
+/-- Unfold an opaque relation function up to its base definition
+    Assume that `f` corresponds to an opaque relation function on first call.
+-/
+partial def unfoldOpaqueFunDef (f : Expr) (args : Array Expr) : TranslateEnvT (Option Expr) := do
+  match ← getFunBody f with
+  | none => return none -- case when class function is undefined but has the expected constraints (e.g., LawfulBEq)
+  | some fbody =>
+     let reduced ← betaLambdaShared fbody args
+     let f' := reduced.getAppFn'
+     let args' := reduced.getAppArgs
+     if (← isFoldable f' args')
+     then unfoldOpaqueFunDef f' args'
+     else return reduced
+
+  where
+    isFoldable (f : Expr) (args : Array Expr) : TranslateEnvT Bool := do
+      match f with
+      | Expr.const .. =>
+           if ← isNotFun f then return false
+           else return !(← isNotFoldable f args)
+      | Expr.lam ..
+      | Expr.proj .. => return true
+      | _ => return false
+
+/-- Return `true` when the following conditions are satisfied:
+      - `f` is an opaque relation function
+      - `f` has a sort parameter not in `relationalCompatibleTypes`
+      - `f` is an alias to a well-founded recursive definition.
+-/
+def isOpaqueRecFun (f : Expr) (args : Array Expr) : TranslateEnvT Bool := do
+  match f with
+  | Expr.const n _ =>
+      if h : 2 ≤ args.size then
+        -- check for recursive definition for opaque relational function
+        if (← (pure $ !(isCompatibleRelationalType args[0])) <&&> isOpaqueRelational n args) then
+          let some auxDef ← unfoldOpaqueFunDef f args | return false
+          let Expr.const n' _  := (getLambdaBody auxDef).getAppFn' | return false
+          return (← isRecursiveFun n')
+      return false
+  | _ => return false
+
+
+/-- Trigger an error if e contains at least one theorem with sorry demonstration. -/
+partial def hasSorryTheorem (e : Expr) (msg : MessageData) : TranslateEnvT Unit :=
+  Expr.forEach e findSorry
+
+ where
+  findSorry (e : Expr) : TranslateEnvT Unit := do
+    match e with
+    | Expr.const n _ =>
+        if n == ``sorryAx then throwEnvError msg
+        else if let ConstantInfo.thmInfo info ← getConstEnvInfo n then hasSorryTheorem (info.value) msg
+        else return ()
+    | _ => return ()
+
+/-- Given `pType := λ α₁ → .. → λ αₙ → t` returns `λ α₁ → .. → λ αₙ → eType`
+    This function is expected to be used only when updating a match return type
+-/
+def updateMatchReturnType (eType : Expr) (pType : Expr) : TranslateEnvT Expr := do
+  lambdaTelescope pType fun params _body => mkLambdaFVarsExpr params eType
+
+end Blaster.Optimize

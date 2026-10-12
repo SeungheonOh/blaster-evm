@@ -1,0 +1,4 @@
+Function signatures:
+850e3dc3: absDiff(int128,int128)
+ebf274be: avg(int256,int256)
+7b8d0f0c: clamp(int256,int256,int256)

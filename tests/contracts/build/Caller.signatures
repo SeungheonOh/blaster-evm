@@ -1,0 +1,5 @@
+Function signatures:
+b3d76188: pay(address,address,uint256)
+
+Error signatures:
+90b8ec18: TransferFailed()

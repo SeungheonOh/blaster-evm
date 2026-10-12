@@ -1,0 +1,12 @@
+Function signatures:
+38af3eed: beneficiary()
+44ee3a1c: extendLock(uint256)
+8da5cb5b: owner()
+251c1aa3: unlockTime()
+2e1a7d4d: withdraw(uint256)
+
+Error signatures:
+0f2e5b6c: Locked()
+644d871f: NotBeneficiary()
+30cd7471: NotOwner()
+90b8ec18: TransferFailed()

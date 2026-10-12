@@ -1,0 +1,1 @@
+{"storage":[{"astId":6,"contract":"tests/contracts/Loop.sol:Loop","label":"table","offset":0,"slot":"0","type":"t_array(t_uint256)4_storage"}],"types":{"t_array(t_uint256)4_storage":{"base":"t_uint256","encoding":"inplace","label":"uint256[4]","numberOfBytes":"128"},"t_uint256":{"encoding":"inplace","label":"uint256","numberOfBytes":"32"}}}

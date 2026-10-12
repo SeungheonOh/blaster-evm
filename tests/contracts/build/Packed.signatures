@@ -1,0 +1,10 @@
+Function signatures:
+68110b2f: bump()
+61bc221a: counter()
+a99dca3f: hi()
+7780c14f: lo()
+8da5cb5b: owner()
+5c975abb: paused()
+475ecb02: setHi(uint128)
+e0bb867f: setLo(uint128)
+16c38b3c: setPaused(bool)

@@ -1,0 +1,1 @@
+[{"inputs":[{"internalType":"uint256","name":"x","type":"uint256"}],"name":"check","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"pure","type":"function"}]

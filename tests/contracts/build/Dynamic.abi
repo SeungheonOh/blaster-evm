@@ -1,0 +1,1 @@
+[{"inputs":[{"internalType":"uint256[]","name":"xs","type":"uint256[]"}],"name":"sum","outputs":[{"internalType":"uint256","name":"s","type":"uint256"}],"stateMutability":"pure","type":"function"}]
