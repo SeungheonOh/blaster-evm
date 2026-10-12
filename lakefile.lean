@@ -24,3 +24,12 @@ lean_lib «Examples» where
 lean_lib «Tests» where
   srcDir := "tests"
   roots := #[`Tests]
+
+-- Conformance with the Ethereum test suites (see tests/README.md, "Conformance").
+lean_lib «Conformance» where
+  srcDir := "tests"
+  roots := #[`Conformance]
+
+lean_exe «conformance» where
+  srcDir := "tests"
+  root := `Conformance.Main

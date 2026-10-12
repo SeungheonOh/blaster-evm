@@ -5,14 +5,18 @@
 #
 # Usage: [TIMEOUT=secs] scripts/check-all.sh [FILE...]
 #   TIMEOUT (default 900) bounds every SMT query. Without FILE arguments all suites run.
-# Prints one summary line per file and writes the messages to .lake/check-logs/.
+# Prints one summary line per file and writes the messages to .lake/check-logs/. Without
+# FILE arguments it also runs the conformance suite (scripts/conformance.sh) when its
+# fixtures have been fetched.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source scripts/limits.sh
 export TIMEOUT="${TIMEOUT:-900}"
 
 files=("$@")
+all=0
 if [ ${#files[@]} -eq 0 ]; then
+  all=1
   files=(
     tests/Tests/Differential.lean
     tests/Tests/Symbolic/Machine.lean
@@ -45,4 +49,22 @@ for f in "${files[@]}"; do
   if [ $status -ne 0 ] || [ "$bad" -ne 0 ]; then failed=1; mark="FAIL"; else mark="ok"; fi
   printf '%-4s %-58s %3d passed %3d failed %5ds\n' "$mark" "$f" "$ok" "$bad" "$secs"
 done
+
+# Conformance with the Ethereum test suites, when their fixtures have been fetched.
+if [ $all -eq 1 ]; then
+  if [ -d .lake/ethereum-tests/Constantinople ]; then
+    log=.lake/check-logs/conformance.log
+    start=$(date +%s)
+    scripts/conformance.sh > "$log" 2>&1
+    status=$?
+    secs=$(( $(date +%s) - start ))
+    # columns of the total line: pass, pass/OOG, inconclusive, out of scope, FAIL
+    read -r ok bad < <(awk '/^total/ {print $2 + $3, $6}' "$log")
+    if [ $status -ne 0 ]; then failed=1; mark="FAIL"; else mark="ok"; fi
+    printf '%-4s %-58s %3d passed %3d failed %5ds\n' "$mark" "conformance (Ethereum tests)" \
+      "${ok:-0}" "${bad:-0}" "$secs"
+  else
+    echo "skip conformance (fetch the fixtures with scripts/fetch-conformance-tests.sh)"
+  fi
+fi
 exit $failed

@@ -57,3 +57,11 @@ Examples and tests load Blaster's native library (`.lake/build/lib/libBlaster.so
 `lake build` of a dependent module rebuilds it, but `lake build Blaster` alone does not:
 after changing the vendored sources, run `lake build Blaster:shared` before using
 `scripts/run-file.sh` (`scripts/check-all.sh` does it).
+
+## Not vendored: Ethereum test fixtures
+
+The conformance runner (`tests/Conformance/`) reads the official fixtures of
+<https://github.com/ethereum/legacytests> (MIT licence), revision
+`1f581b8ccdc4c63acf5f2c5c1b155c690c32a8eb`. They are too large to vendor (760 MB for the
+directories used); `scripts/fetch-conformance-tests.sh` fetches exactly that revision into
+`.lake/ethereum-tests`.

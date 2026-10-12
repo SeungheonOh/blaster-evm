@@ -40,10 +40,12 @@ as explicit assumptions: it does not reject address arguments with dirty upper b
 (`balanceOf[dst mod 2^160]` is credited), and it adds to the recipient's balance without
 an overflow check, which only the boundedness of the Ether supply makes safe.
 
-The isolated [test suites](tests/README.md) check the machine itself: 226 artificial
-programs against go-ethereum's reference interpreter, symbolic semantics of artificial
-programs, and Solidity code-generation patterns (packed storage, signed arithmetic, revert
-reasons, dynamic calldata, cross-contract calls, loops).
+The isolated [test suites](tests/README.md) check the machine itself:
+
+- **Conformance with the official Ethereum tests.** The machine runs the 609 legacy VM tests and the 10,716 Cancun general state tests of `ethereum/tests`. Every in-scope test passes: 2213 match the expected results exactly, and 1166 expected exceptional halts are runs that provably exhaust the gas, which the machine doesn't model. 88 tests read `GAS` and are inconclusive. The rest need what the machine leaves out, mostly calls into other contracts and contract creation.
+- **Differential testing:** 226 artificial programs against go-ethereum's reference interpreter.
+- **Symbolic semantics** of artificial programs.
+- **Solidity code-generation patterns:** packed storage, signed arithmetic, revert reasons, dynamic calldata, cross-contract calls, loops.
 
 ## How it works
 
@@ -171,8 +173,8 @@ project: the packed-storage suite went from not finishing in 20 minutes to 4 sec
   `VaultBuggy`).
 - **Trust.** As with any `blaster` call, Z3 proofs are not reconstructed: the theorems rest
   on the `Blaster.Tactic.blasterProven` axiom, i.e. on Blaster's optimiser and translation
-  and on Z3. The machine is validated against go-ethereum on 226 programs, but it is not
-  proved equivalent to a reference semantics.
+  and on Z3. The machine is validated against the Ethereum test suites and go-ethereum,
+  but it is not proved equivalent to a reference semantics.
 
 ## Layout
 
@@ -181,8 +183,9 @@ EvmBlaster/            the formal EVM, spec helpers, #evm_contract
 EvmBlaster/Examples/   properties of Config, Vault, VaultBuggy, Token, WETH9, OZToken
 contracts/             Solidity sources, compiled runtime bytecode (build/),
                        OpenZeppelin v5.1.0 sources (lib/), WETH9 mainnet bytecode (mainnet/)
-tests/                 isolated test suites (see tests/README.md)
-scripts/               check-all.sh, run-file.sh, limits.sh, compile.sh
+tests/                 isolated test suites and the conformance runner (see tests/README.md)
+scripts/               check-all.sh, run-file.sh, limits.sh, compile.sh,
+                       fetch-conformance-tests.sh, conformance.sh
 vendor/Lean-blaster/   vendored Blaster with local changes
 ```
 
@@ -200,6 +203,17 @@ memory and 4 cores, at low priority, and the unit (Z3 included) is stopped when 
 ends; checks are serialised by a lock. The limits are set by `CHECK_MEM` and `CHECK_CPU`
 (see [`scripts/limits.sh`](scripts/limits.sh)). Avoid `lake build Examples` and
 `lake test`: lake checks all files of a library at once, each with its own Z3 processes.
+
+The conformance suite needs the Ethereum test fixtures (760 MB, fetched once into
+`.lake/`); `check-all.sh` then runs it too, or on its own:
+
+```bash
+scripts/fetch-conformance-tests.sh
+```
+
+```bash
+scripts/conformance.sh
+```
 
 One file, with a timeout per SMT query:
 
