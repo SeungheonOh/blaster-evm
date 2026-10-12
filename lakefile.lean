@@ -17,7 +17,9 @@ lean_lib «Examples» where
   srcDir := "."
   roots := #[`EvmBlaster.Examples.Config, `EvmBlaster.Examples.Vault,
              `EvmBlaster.Examples.VaultBuggy, `EvmBlaster.Examples.Token,
-             `EvmBlaster.Examples.WETH9, `EvmBlaster.Examples.OZToken]
+             `EvmBlaster.Examples.WETH9, `EvmBlaster.Examples.OZToken,
+             `EvmBlaster.Examples.Timelock, `EvmBlaster.Examples.Auction,
+             `EvmBlaster.Examples.MultiSig, `EvmBlaster.Examples.OZPausableToken]
 
 -- Isolated test suites on artificial programs and contracts (see tests/README.md).
 @[test_driver]

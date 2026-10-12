@@ -1,0 +1,21 @@
+Function signatures:
+69b41170: DELAY()
+bc063e1a: MAX_FEE()
+f851a440: admin()
+ea8a1af0: cancel()
+f7992d85: eta()
+f8c8f5f8: executeFee()
+ddca3f43: fee()
+643090bc: pendingFee()
+dbe7c1a1: queueFee(uint256)
+
+Error signatures:
+cd4e6167: FeeTooHigh()
+7bfa4b9f: NotAdmin()
+05102b04: NothingQueued()
+085de625: TooEarly()
+
+Event signatures:
+f15f56066f17e824594aa6ed95b1c71848c942323abf5d5a84f893a07037239a: FeeCancelled()
+5fc463da23c1b063e66f9e352006a7fbe8db7223c455dc429e881a2dfe2f94f1: FeeChanged(uint256,uint256)
+60672e94b125e4cbadbe4ada637bb23e259ceddea15544c2633ef47a93d295ef: FeeQueued(uint256,uint256)

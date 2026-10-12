@@ -210,6 +210,15 @@ def addDitePropFacts (e : Expr) (h : Expr) (nextCtxId : CtxId) : TranslateEnvT U
           let body ← mkAppExpr e (← mkBVarExpr 0)
           mkForallExpr (← Term.mkFreshBinderName) BinderInfo.default c body
 
+/-- `updateEqualityMap lhs rhs`, unless `rhs` contains `lhs`: rewriting `lhs` to `rhs`
+    would then never terminate. (E.g. a word known to equal its masked self, `x = x &&& m`,
+    which the bitwise rules normalise to `x = 2^k * (x / 2^k)`.) -/
+def updateEqualityMapAcyclic (lhs : Expr) (rhs : Expr) (nextCtxId : CtxId) : TranslateEnvT Unit := do
+  let occurs := match lhs with
+    | Expr.fvar v => rhs.containsFVar v
+    | _ => (rhs.find? (exprEq · lhs)).isSome
+  if !occurs then updateEqualityMap lhs rhs nextCtxId
+
 @[always_inline, inline]
 def addEqRewriteInMap (e : Expr) (nextCtxId : CtxId) : TranslateEnvT Unit := do
  if let some (_psort, a, b) := eq? e then
@@ -218,11 +227,11 @@ def addEqRewriteInMap (e : Expr) (nextCtxId : CtxId) : TranslateEnvT Unit := do
       | Expr.fvar _, Expr.fvar _ => pure ()
       | Expr.lit _, _ => updateEqualityMap b a nextCtxId
       | _, Expr.lit _ => updateEqualityMap a b nextCtxId
-      | Expr.fvar _, _ => updateEqualityMap a b nextCtxId
-      | _, Expr.fvar _ => updateEqualityMap b a nextCtxId
+      | Expr.fvar _, _ => updateEqualityMapAcyclic a b nextCtxId
+      | _, Expr.fvar _ => updateEqualityMapAcyclic b a nextCtxId
       | _, _ =>
-        if (← isCtorExpr a.getAppFn) then updateEqualityMap b a nextCtxId
-        else if (← isCtorExpr b.getAppFn) then updateEqualityMap a b nextCtxId
+        if (← isCtorExpr a.getAppFn) then updateEqualityMapAcyclic b a nextCtxId
+        else if (← isCtorExpr b.getAppFn) then updateEqualityMapAcyclic a b nextCtxId
         else pure ()
 
 /-- Perform the following actions:

@@ -73,6 +73,42 @@ index 6bd7b1e..d876f4b 100644
       , memCache.commonExpr.notFalse
       , memCache.commonExpr.propAnd
       , memCache.commonExpr.propFalse
+diff --git a/Blaster/Optimize/Hypotheses.lean b/Blaster/Optimize/Hypotheses.lean
+index 55d7871..2f9a2da 100644
+--- a/Blaster/Optimize/Hypotheses.lean
++++ b/Blaster/Optimize/Hypotheses.lean
+@@ -210,6 +210,15 @@ def addDitePropFacts (e : Expr) (h : Expr) (nextCtxId : CtxId) : TranslateEnvT U
+           let body ← mkAppExpr e (← mkBVarExpr 0)
+           mkForallExpr (← Term.mkFreshBinderName) BinderInfo.default c body
+ 
++/-- `updateEqualityMap lhs rhs`, unless `rhs` contains `lhs`: rewriting `lhs` to `rhs`
++    would then never terminate. (E.g. a word known to equal its masked self, `x = x &&& m`,
++    which the bitwise rules normalise to `x = 2^k * (x / 2^k)`.) -/
++def updateEqualityMapAcyclic (lhs : Expr) (rhs : Expr) (nextCtxId : CtxId) : TranslateEnvT Unit := do
++  let occurs := match lhs with
++    | Expr.fvar v => rhs.containsFVar v
++    | _ => (rhs.find? (exprEq · lhs)).isSome
++  if !occurs then updateEqualityMap lhs rhs nextCtxId
++
+ @[always_inline, inline]
+ def addEqRewriteInMap (e : Expr) (nextCtxId : CtxId) : TranslateEnvT Unit := do
+  if let some (_psort, a, b) := eq? e then
+@@ -218,11 +227,11 @@ def addEqRewriteInMap (e : Expr) (nextCtxId : CtxId) : TranslateEnvT Unit := do
+       | Expr.fvar _, Expr.fvar _ => pure ()
+       | Expr.lit _, _ => updateEqualityMap b a nextCtxId
+       | _, Expr.lit _ => updateEqualityMap a b nextCtxId
+-      | Expr.fvar _, _ => updateEqualityMap a b nextCtxId
+-      | _, Expr.fvar _ => updateEqualityMap b a nextCtxId
++      | Expr.fvar _, _ => updateEqualityMapAcyclic a b nextCtxId
++      | _, Expr.fvar _ => updateEqualityMapAcyclic b a nextCtxId
+       | _, _ =>
+-        if (← isCtorExpr a.getAppFn) then updateEqualityMap b a nextCtxId
+-        else if (← isCtorExpr b.getAppFn) then updateEqualityMap a b nextCtxId
++        if (← isCtorExpr a.getAppFn) then updateEqualityMapAcyclic b a nextCtxId
++        else if (← isCtorExpr b.getAppFn) then updateEqualityMapAcyclic a b nextCtxId
+         else pure ()
+ 
+ /-- Perform the following actions:
 diff --git a/Blaster/Optimize/Opaque.lean b/Blaster/Optimize/Opaque.lean
 index f055ef7..7cd1579 100644
 --- a/Blaster/Optimize/Opaque.lean
@@ -772,10 +808,10 @@ index 41b6ad2..9f40583 100644
 +import Tests.Smt.SmtNat.SmtNatBitwise
 diff --git a/Tests/Smt/SmtNat/SmtNatBitwise.lean b/Tests/Smt/SmtNat/SmtNatBitwise.lean
 new file mode 100644
-index 0000000..8b198e4
+index 0000000..0e03b98
 --- /dev/null
 +++ b/Tests/Smt/SmtNat/SmtNatBitwise.lean
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,143 @@
 +import Blaster
 +
 +namespace Test.SmtNatBitwise
@@ -898,6 +934,17 @@ index 0000000..8b198e4
 +#blaster (only-optimize: 1) [∀ (x : Nat), x < 2^160 → x &&& (2^160 - 1) = x]
 +
 +#blaster (only-optimize: 1) [∀ (x y : Nat), x < 2^256 → y = x % 2^256 → y = x]
++
++/-! # A variable equal to a term containing it is not rewritten with that equality
++
++`x = x &&& m` normalises to `x = 2^224 * (x / 2^224)`: rewriting `x` with it would never
++terminate. (A `bytes4` argument checked by Solidity's ABI decoder has this shape.) Without
++the occurs check, this exhausts the memory. -/
++
++#blaster (timeout: 10) [∀ (x : Nat), x < 2^256 →
++  (if x = x &&& (2^256 - 2^224) then
++     (if x &&& (2^256 - 2^224) = 0x7965db0b * 2^224 then x / 2^224 else 0x7965db0b)
++   else 0x7965db0b) = 0x7965db0b]
 +
 +/-! # Test cases to ensure that counterexample are properly detected -/
 +

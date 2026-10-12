@@ -1,0 +1,18 @@
+Function signatures:
+2a24f46c: auctionEnd()
+4b449cba: auctionEndTime()
+38af3eed: beneficiary()
+1998aeef: bid()
+d57bde79: highestBid()
+91f90157: highestBidder()
+3ccfd60b: withdraw()
+
+Error signatures:
+d02e774d: AuctionAlreadyEnded()
+61cfdcf8: AuctionEndAlreadyCalled()
+44cee290: AuctionNotYetEnded()
+4e12c1bb: BidNotHighEnough(uint256)
+
+Event signatures:
+daec4582d5d9595688c8c98545fdd1c696d41c6aeaeb636737e84ed2f5c00eda: AuctionEnded(address,uint256)
+f4757a49b326036464bec6fe419a4ae38c8a02ce3e68bf0809674f6aab8ad300: HighestBidIncreased(address,uint256)

@@ -26,6 +26,8 @@ if [ ${#files[@]} -eq 0 ]; then
     EvmBlaster/Examples/Config.lean EvmBlaster/Examples/Vault.lean
     EvmBlaster/Examples/VaultBuggy.lean EvmBlaster/Examples/Token.lean
     EvmBlaster/Examples/OZToken.lean EvmBlaster/Examples/WETH9.lean
+    EvmBlaster/Examples/Timelock.lean EvmBlaster/Examples/Auction.lean
+    EvmBlaster/Examples/MultiSig.lean EvmBlaster/Examples/OZPausableToken.lean
     vendor/Lean-blaster/Tests/Smt/SmtNat/SmtNatBitwise.lean
   )
 fi

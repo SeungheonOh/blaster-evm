@@ -48,7 +48,15 @@ local changes against that revision.
 4. **`x % n` under a bound hypothesis**: `x % n` is rewritten to `x` when `x < n` is a
    hypothesis in scope (`modBoundedInHyps`). Typical case: an address `a < 2^160` masked to
    160 bits.
-5. **Tests**: `Tests/Smt/SmtNat/SmtNatBitwise.lean` covers these changes, including false
+5. **Occurs check for equality rewrites** (`Blaster/Optimize/Hypotheses.lean`,
+   `updateEqualityMapAcyclic`). A hypothesis `x = t` in scope (a premise or the condition
+   of an `if-then-else` branch) makes the optimizer rewrite `x` to `t`. Upstream does so
+   even when `t` contains `x`, and the rewriting then never ends. With the bitwise rules
+   this happens in ordinary code: Solidity's ABI decoder checks that a `bytes4` argument
+   equals its masked self, `x = x &&& m`, which normalises to `x = 2^224 * (x / 2^224)`.
+   Symbolic execution of any `supportsInterface(bytes4)` exhausted the memory. Such
+   equalities are no longer used as rewrites (they remain hypotheses).
+6. **Tests**: `Tests/Smt/SmtNat/SmtNatBitwise.lean` covers these changes, including false
    near-miss statements that the rewrites must not prove.
 
 ## Rebuilding the plugin

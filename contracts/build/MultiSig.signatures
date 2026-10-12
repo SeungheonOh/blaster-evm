@@ -1,0 +1,27 @@
+Function signatures:
+785ffb37: THRESHOLD()
+ba0179b5: confirm(uint256)
+fe0d94c1: execute(uint256)
+80f59a65: isConfirmed(uint256,address)
+0464dcff: owner0()
+73688914: owner1()
+52709725: owner2()
+20c5429b: revoke(uint256)
+203dd666: submit(address,uint256)
+b77bf600: transactionCount()
+9ace38c2: transactions(uint256)
+
+Error signatures:
+5f8a9c0b: AlreadyConfirmed()
+0dc10197: AlreadyExecuted()
+1ce7c6ae: NoSuchTransaction()
+e471069a: NotConfirmed()
+b9310b56: NotEnoughConfirmations()
+30cd7471: NotOwner()
+90b8ec18: TransferFailed()
+
+Event signatures:
+6f220d98c15dbd07fdc24781b682ea34f92411fc61b83c761dd927afbe02d3fd: Confirmed(uint256,address)
+bcf6a68a2f901be4a23a41b53acd7697893a7e34def4e28acba584da75283b67: Executed(uint256)
+0819476e55ffbe23df64353d5f7898429609397cc93c44300b058b51648f7878: Revoked(uint256,address)
+267039b92797f7f253808dbb0dfcbfb51a4f19fd7784d479de4117247514fdd0: Submitted(uint256,address,uint256)

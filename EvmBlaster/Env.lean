@@ -144,6 +144,14 @@ def KeccakInjective (w : Query → Nat) : Prop :=
 def KeccakAbove (w : Query → Nat) (bound : Nat) : Prop :=
   ∀ n ws, bound ≤ w (.keccak n ws)
 
+/-- Hashes of distinct inputs are at least `d` apart, and at least `d` below `2^256`: the
+    `d` consecutive slots of a struct stored at a hash (Solidity's layout for structs in
+    mappings) never meet another hashed slot, and never wrap around. -/
+def KeccakSpread (w : Query → Nat) (d : Nat) : Prop :=
+  (∀ n ws n' ws', (n ≠ n' ∨ ws ≠ ws') →
+    w (.keccak n ws) + d ≤ w (.keccak n' ws') ∨ w (.keccak n' ws') + d ≤ w (.keccak n ws)) ∧
+  ∀ n ws, w (.keccak n ws) + d ≤ U256
+
 end World
 
 /-- Return data: empty, or that of the `i`-th outgoing call. -/

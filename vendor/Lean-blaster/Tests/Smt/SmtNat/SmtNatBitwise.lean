@@ -121,6 +121,17 @@ namespace Test.SmtNatBitwise
 
 #blaster (only-optimize: 1) [∀ (x y : Nat), x < 2^256 → y = x % 2^256 → y = x]
 
+/-! # A variable equal to a term containing it is not rewritten with that equality
+
+`x = x &&& m` normalises to `x = 2^224 * (x / 2^224)`: rewriting `x` with it would never
+terminate. (A `bytes4` argument checked by Solidity's ABI decoder has this shape.) Without
+the occurs check, this exhausts the memory. -/
+
+#blaster (timeout: 10) [∀ (x : Nat), x < 2^256 →
+  (if x = x &&& (2^256 - 2^224) then
+     (if x &&& (2^256 - 2^224) = 0x7965db0b * 2^224 then x / 2^224 else 0x7965db0b)
+   else 0x7965db0b) = 0x7965db0b]
+
 /-! # Test cases to ensure that counterexample are properly detected -/
 
 #blaster (gen-cex: 0) (solve-result: 1) [∀ (x y : Nat), x ^^^ y = x ||| y]

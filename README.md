@@ -28,12 +28,16 @@ per file on one machine.
 
 | Contract | Bytecode | Properties | Time |
 | --- | --- | --- | --- |
-| [`Config`](contracts/Config.sol) | solc 0.8.28 | only the owner changes the fee or the owner; `maxFee` is immutable; a new fee respects the cap; non-payable; no external calls; `setFee` works for the owner and reverts for anyone else; **over any sequence of calls in which the owner sends nothing, the owner and the fee never change** (Lean induction over the Blaster-proved single-call theorems) | 4 s |
-| [`Vault`](contracts/Vault.sol) | solc 0.8.28 | Ether leaves only towards the beneficiary, only after the deadline, at most one call per transaction; the deadline only moves forward and only by the owner; roles are immutable; balance accounting; the beneficiary *can* withdraw (liveness, assuming the recipient accepts the transfer) | 40 s |
-| [`Token`](contracts/Token.sol) | solc 0.8.28 | only the minter changes the supply; the minter is immutable; only the holder decreases a balance; `transfer` conserves and touches nothing else; `transfer` succeeds when funded; and the keccak assumptions are *needed* (counterexamples without them) | 10 s |
-| [`VaultBuggy`](contracts/VaultBuggy.sol) | solc 0.8.28 | Blaster finds the `tx.origin` phishing attack and the deadline-shortening bug as counterexamples | 3 s |
-| **WETH9** ([source](contracts/mainnet/WETH9.sol.txt)) | **deployed mainnet bytecode** (solc 0.4, 2017) | Ether leaves only towards the caller and is burned from the caller's WETH balance; incoming Ether is credited; nobody debits an account except its holder or a spender within its allowance, which is consumed; allowances change only by their owner or spender; `transfer` conserves; withdrawals succeed | 508 s |
-| [`OZToken`](contracts/OZToken.sol) | OpenZeppelin v5.1.0 ERC20 + Ownable, solc 0.8.28 | only the owner changes the supply or the owner; after renouncing, the supply is fixed forever; only the holder or a spender within its allowance debits an account; `transfer` and `approve` are exact | 51 s |
+| [`Config`](contracts/Config.sol) | solc 0.8.28 | only the owner changes the fee or the owner; `maxFee` is immutable; a new fee respects the cap; non-payable; no external calls; `setFee` works for the owner and reverts for anyone else; **over any sequence of calls in which the owner sends nothing, the owner and the fee never change** (Lean induction over the Blaster-proved single-call theorems) | 3 s |
+| [`Vault`](contracts/Vault.sol) | solc 0.8.28 | Ether leaves only towards the beneficiary, only after the deadline, at most one call per transaction; the deadline only moves forward and only by the owner; roles are immutable; balance accounting; the beneficiary *can* withdraw (liveness, assuming the recipient accepts the transfer) | 32 s |
+| [`Token`](contracts/Token.sol) | solc 0.8.28 | only the minter changes the supply; the minter is immutable; only the holder decreases a balance; `transfer` conserves and touches nothing else; `transfer` succeeds when funded; and the keccak assumptions are *needed* (counterexamples without them) | 6 s |
+| [`VaultBuggy`](contracts/VaultBuggy.sol) | solc 0.8.28 | Blaster finds the `tx.origin` phishing attack and the deadline-shortening bug as counterexamples | 2 s |
+| **WETH9** ([source](contracts/mainnet/WETH9.sol.txt)) | **deployed mainnet bytecode** (solc 0.4, 2017) | Ether leaves only towards the caller and is burned from the caller's WETH balance; incoming Ether is credited; nobody debits an account except its holder or a spender within its allowance, which is consumed; allowances change only by their owner or spender; `transfer` conserves; withdrawals succeed | 367 s |
+| [`OZToken`](contracts/OZToken.sol) | OpenZeppelin v5.1.0 ERC20 + Ownable, solc 0.8.28 | only the owner changes the supply or the owner; after renouncing, the supply is fixed forever; only the holder or a spender within its allowance debits an account; `transfer` and `approve` are exact | 27 s |
+| [`Timelock`](contracts/Timelock.sol) | solc 0.8.28 | the fee changes only when a queued change is due, and only to the queued value; only the admin queues; a change becomes executable exactly 2 days after it is queued; the fee stays within its cap; anyone can apply a due change; **over any sequence of calls without the admin, the fee keeps its value or takes the one already queued** (Lean induction) | 4 s |
+| [`Auction`](contracts/Auction.sol) | the Solidity documentation's `SimpleAuction`, solc 0.8.28 | Ether leaves only as the final payment to the beneficiary or as the caller's own refund; settings are fixed; bids are genuine; refunds succeed. **A boundary bug**: at `block.timestamp == auctionEndTime` a bid is accepted after `auctionEnd`, its Ether is stuck forever, and the winner's bid (already paid out) becomes refundable to the winner (`late_bid_accepted`); every other call keeps exact accounting. [`AuctionFixed`](contracts/AuctionFixed.sol), which closes bidding at the end time, keeps it for every call | 5 s |
+| [`MultiSig`](contracts/MultiSig.sol) | solc 0.8.28 | Ether leaves only through `execute`, to the recorded recipient with the recorded value, after two recorded confirmations; only owners confirm, for themselves; an executed transaction stays executed; confirmation counters stay exact; **from deployment, over any sequence of calls, every payment was confirmed by two distinct owners** (Lean induction) | 477 s |
+| [`OZPausableToken`](contracts/OZPausableToken.sol) | OpenZeppelin v5.1.0 ERC20 + Pausable + AccessControl, solc 0.8.28 | while paused, no balance and not the supply changes; only `PAUSER_ROLE` holders pause or unpause; only `MINTER_ROLE` holders mint; roles change only through the role's admin, or by renouncing; a pauser can always unpause | 417 s |
 
 Two of WETH9's theorems surfaced genuine properties of the 2017 bytecode, which now appear
 as explicit assumptions: it does not reject address arguments with dirty upper bits
@@ -86,6 +90,9 @@ hypotheses about the world. The examples use, for instance:
 | --- | --- |
 | `World.WF world`, `env.WF` | every value is a 256-bit word, addresses are 160 bits |
 | `World.KeccakInjective`, `World.KeccakAbove 5` | idealised collision resistance; hashes avoid the low storage slots |
+| `World.KeccakSpread world 4` | hashes of distinct inputs are at least 4 slots apart: a struct stored in a mapping (4 slots in `MultiSig`) never meets another hashed slot |
+| `EndedInThePast` (`Auction`) | reachability: an ended auction is only called at or after its end time, since block timestamps never decrease |
+| `kec tx.2 = H` for every call (`MultiSig`) | across a sequence of transactions, keccak256 is one and the same function |
 | `world (.callSuccess 0) ≠ 0` | the first outgoing call succeeds (e.g. the recipient is an EOA) |
 | `Mainnet world` | WETH9's name and symbol slots hold their mainnet values |
 | `BalancesBounded`, `SupplyBacked` | invariants of the contract assumed of the pre-state (balances backed by the Ether supply; balances sum to the total supply) |
@@ -122,8 +129,8 @@ each:
 
 Blaster is vendored in [`vendor/Lean-blaster`](vendor) (details and the exact upstream
 revision in [`vendor/UPSTREAMS.md`](vendor/UPSTREAMS.md); full diff in
-`vendor/Lean-blaster.patch`). All changes are general-purpose rewrite rules for `Nat`, not
-EVM-specific:
+`vendor/Lean-blaster.patch`). All changes are general-purpose, not EVM-specific: rewrite
+rules for `Nat`, and one fix to the optimizer:
 
 1. **Bitwise operators.** Upstream unfolds `&&&`, `|||`, `^^^` into well-founded recursion
    it cannot translate. They are now opaque. A small bit-support analysis (which bit
@@ -141,10 +148,14 @@ EVM-specific:
    `((x / 2^p) % 2^w) * 2^q + ((x / 2^(p+w)) % 2^v) * 2^(q+w)`, become one field, so a
    word read byte by byte from memory collapses back into (a slice of) the stored word.
 4. **`x % n = x` under a hypothesis `x < n`**, e.g. an address masked to 160 bits.
+5. **An occurs check** (a fix, not a rule): a hypothesis `x = t` is no longer used to
+   rewrite `x` when `t` contains `x`, which made the optimizer loop. Solidity's ABI check
+   of a `bytes4` argument produces exactly such a hypothesis, `x = 2^224 * (x / 2^224)`,
+   so every `supportsInterface` ran out of memory.
 
 They come with tests in `vendor/Lean-blaster/Tests/Smt/SmtNat/SmtNatBitwise.lean`,
 including false near-miss statements the rewrites must not prove. Their effect on this
-project: the packed-storage suite went from not finishing in 20 minutes to 4 seconds.
+project: the packed-storage suite went from not finishing in 20 minutes to 2 seconds.
 
 ## Feasibility: what we learned
 
@@ -160,6 +171,15 @@ project: the packed-storage suite went from not finishing in 20 minutes to 4 sec
   theorem, and several examples show why they matter: without the keccak assumptions,
   without `BalancesBounded` on WETH9, or with a dirty `dst` address, Blaster finds
   counterexamples (or fails to prove the statement) for reasons that are real.
+- **It finds real bugs.** In the Solidity documentation's `SimpleAuction`, bidding and
+  ending overlap at `block.timestamp == auctionEndTime`: a bid can be accepted after the
+  auction has paid out. The counterexample to exact accounting led straight to it, and
+  the bug is now a proved theorem about the original bytecode (`late_bid_accepted`).
+- **Single-call theorems need reachability facts.** They hold in every pre-state,
+  including states no sequence of transactions produces, and some properties fail only
+  there (an auction ended before its end time, a transaction marked executed but never
+  submitted). Such facts are stated as hypotheses (`EndedInThePast`,
+  `id < transactionCount`) or proved as invariants by induction (`MultiSig.Counted`).
 - **Sequences of transactions** are handled in Lean: a single-call theorem holds in
   every chain state, so it holds for each call of any sequence, and properties of the
   whole sequence follow by induction (`runCalls` in [`Trace.lean`](EvmBlaster/Trace.lean),
@@ -180,7 +200,8 @@ project: the packed-storage suite went from not finishing in 20 minutes to 4 sec
 
 ```
 EvmBlaster/            the formal EVM, spec helpers, #evm_contract
-EvmBlaster/Examples/   properties of Config, Vault, VaultBuggy, Token, WETH9, OZToken
+EvmBlaster/Examples/   properties of Config, Vault, VaultBuggy, Token, WETH9, OZToken,
+                       Timelock, Auction, MultiSig, OZPausableToken
 contracts/             Solidity sources, compiled runtime bytecode (build/),
                        OpenZeppelin v5.1.0 sources (lib/), WETH9 mainnet bytecode (mainnet/)
 tests/                 isolated test suites and the conformance runner (see tests/README.md)
