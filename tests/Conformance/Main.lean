@@ -8,7 +8,7 @@ import Conformance.StateTests
 tests (`exec` field) and blockchain-form state tests (`blocks` field, `Cancun` entries
 only). It prints a summary per suite directory, the reasons for out-of-scope and
 inconclusive tests, and every failure, and exits with status 1 if any test failed or a
-fixture could not be read. See the "Conformance" section of `tests/README.md`.
+fixture could not be read. See `docs/testing.md`.
 -/
 
 open Lean Conformance

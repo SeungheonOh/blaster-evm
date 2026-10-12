@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch the Ethereum test fixtures run by the conformance runner (tests/README.md, "Conformance")
+# Fetch the Ethereum test fixtures run by the conformance runner (docs/testing.md)
 # into .lake/ethereum-tests: a sparse checkout of ethereum/legacytests at a pinned commit.
 #
 # Usage: scripts/fetch-conformance-tests.sh

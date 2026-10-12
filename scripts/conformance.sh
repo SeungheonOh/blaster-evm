@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the machine against the Ethereum test suites (tests/README.md, "Conformance").
+# Run the machine against the Ethereum test suites (docs/testing.md).
 # Fetch the fixtures first with scripts/fetch-conformance-tests.sh.
 #
 # Usage: scripts/conformance.sh [--verbose] [PATH...]

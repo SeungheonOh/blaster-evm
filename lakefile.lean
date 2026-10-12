@@ -12,7 +12,7 @@ require «Blaster» from "vendor/Lean-blaster"
 lean_lib «EvmBlaster» where
   roots := #[`EvmBlaster]
 
--- Properties of example contracts (see README.md). Checking them runs Blaster and Z3.
+-- Properties of example contracts (see docs/examples.md). Checking them runs Blaster and Z3.
 lean_lib «Examples» where
   srcDir := "."
   roots := #[`EvmBlaster.Examples.Config, `EvmBlaster.Examples.Vault,
@@ -21,13 +21,13 @@ lean_lib «Examples» where
              `EvmBlaster.Examples.Timelock, `EvmBlaster.Examples.Auction,
              `EvmBlaster.Examples.MultiSig, `EvmBlaster.Examples.OZPausableToken]
 
--- Isolated test suites on artificial programs and contracts (see tests/README.md).
+-- Isolated test suites on artificial programs and contracts (see docs/testing.md).
 @[test_driver]
 lean_lib «Tests» where
   srcDir := "tests"
   roots := #[`Tests]
 
--- Conformance with the Ethereum test suites (see tests/README.md, "Conformance").
+-- Conformance with the Ethereum test suites (see docs/testing.md).
 lean_lib «Conformance» where
   srcDir := "tests"
   roots := #[`Conformance]
