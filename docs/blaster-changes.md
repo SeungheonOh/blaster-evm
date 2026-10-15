@@ -42,7 +42,9 @@ variables.
    ```
 
    (`Token`: without injectivity of keccak256, the recipient's balance slot can be the
-   slot of `totalSupply`, so a transfer changes the supply.)
+   slot of `totalSupply`, so a transfer changes the supply.) Sorted values the solver
+   writes `(as List.nil (List Int))` are printed as the value alone. `./blaster-evm` reads
+   these lines back to replay counterexamples (see [annotations.md](annotations.md)).
 
 They come with tests in `vendor/Lean-blaster/Tests/Smt/SmtNat/SmtNatBitwise.lean`,
 including false near-miss statements the rewrites must not prove and a regression test for

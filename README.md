@@ -8,6 +8,54 @@ as a constant, and Blaster executes the interpreter symbolically and hands what 
 to Z3. A theorem covers every caller, value, calldata and block, and every state of the
 rest of the chain; assumptions about that state are explicit hypotheses.
 
+## Specifications in Solidity
+
+Properties can be written next to the code, in the
+[Universal Annotation Language](https://github.com/input-output-hk/UniversalAnnotationLanguage)
+(UAL) of the Blaster team, and proved with one command:
+
+```solidity
+/*@ ONCHAIN [steps: 4000] withdraw : { uint256 : asAbi } -> () @*/
+function withdraw(uint256 amount) external { ... }
+
+/*@ PROPERTY withdraw_pays_the_caller :
+  ∀ (amount : Nat) (env : Env) (world : World),
+    let r := withdraw amount env world
+    isSuccessful r →
+      paidTo env.sender r = amount ∧
+      Bank.balances (after world r) env.sender = Bank.balances (before world) env.sender - amount
+@*/
+```
+
+```bash
+./blaster-evm examples/Bank.sol
+```
+
+```
+blaster-evm · examples/Bank.sol  (solc 0.8.28)
+  Bank  1080 bytes · 3 ONCHAIN · 6 properties
+    ✓ deposit_credits_the_caller           proved  0.5s
+    ✓ withdraw_pays_the_caller             proved  13.7s
+    ...
+```
+
+A false property gets a counterexample in Solidity terms: the call, the storage it read
+(`contributions[msg.sender] = 32286`), what it did, and which part of the statement fails.
+Parser, code generator, driver and reports are all Lean. See
+[docs/annotations.md](docs/annotations.md).
+
+| Example | Highlights |
+| --- | --- |
+| [Bank](examples/Bank.sol) | deposits and withdrawals are exact, other balances untouched, solvency, only the owner pauses |
+| [Token](examples/Token.sol) | ERC-20: transfers are exact and touch nobody else, allowances are spent (infinite approvals excepted), only the owner mints |
+| [Escrow](examples/Escrow.sol) | an enum state machine: settled is final, money goes only to the parties, at most the price is paid |
+| [Vesting](examples/Vesting.sol) | structs in a mapping: claims pay exactly what has vested and never exceed the grant |
+| [Crowdfund](examples/Crowdfund.sol) | two deliberate bugs, each caught with a readable counterexample |
+
+## Lean examples
+
+Theorems can also be stated directly in Lean, over the bytecode:
+
 ```lean
 #evm_contract_file Vault "contracts/build/Vault.bin-runtime"
 
@@ -19,8 +67,6 @@ theorem transfers_only_after_unlock (env : Env) (world : Query → Nat) :
         env.msg.caller = beneficiary world ∧ unlockTime world ≤ env.block.timestamp) := by
   blaster
 ```
-
-## Examples
 
 | Contract | Highlights |
 | --- | --- |
@@ -45,13 +91,20 @@ into other contracts. More tests, against go-ethereum and of the symbolic semant
 
 ## Quick start
 
-Requirements: Lean 4.24.0 (via elan) and Z3 on `PATH`.
+Requirements: Lean 4.24.0 (via elan) and Z3 on `PATH`. Annotated Solidity:
+
+```bash
+./blaster-evm examples/
+```
+
+Everything (test suites, Lean examples, annotated Solidity, conformance), one check at a
+time and memory-capped:
 
 ```bash
 scripts/check-all.sh
 ```
 
-checks every proof file, one at a time and memory-capped. One file:
+One Lean file:
 
 ```bash
 scripts/run-file.sh EvmBlaster/Examples/Vault.lean
@@ -61,6 +114,7 @@ More in [docs/running.md](docs/running.md).
 
 ## Documentation
 
+- [docs/annotations.md](docs/annotations.md): UAL annotations in Solidity and `./blaster-evm`
 - [docs/design.md](docs/design.md): how the EVM and the chain state are modelled
 - [docs/examples.md](docs/examples.md): every example and its properties
 - [docs/testing.md](docs/testing.md): test suites and Ethereum conformance
@@ -73,6 +127,9 @@ More in [docs/running.md](docs/running.md).
 ```
 EvmBlaster/            the EVM in Lean, spec helpers, #evm_contract
 EvmBlaster/Examples/   proofs about the example contracts
+UAL/                   UAL for Solidity: grammar, EVM ledger API, #ual_property, the driver
+examples/              Solidity contracts with UAL annotations
+blaster-evm            the command (builds and runs UAL/Driver)
 contracts/             Solidity sources and compiled bytecode
 tests/                 test suites and the conformance runner
 scripts/               checking, compiling, fetching test fixtures

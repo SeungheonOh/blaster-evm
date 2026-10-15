@@ -551,6 +551,7 @@ partial def parseSExps : List String → List SExp × List String
 partial def SExp.pretty : SExp → String
   | .atom "List.nil" => "[]"
   | .atom s => s
+  | .list [.atom "as", x, _] => x.pretty
   | e@(.list xs) =>
     match listElems e with
     | some es => "[" ++ ", ".intercalate (es.map SExp.pretty) ++ "]"
@@ -558,6 +559,7 @@ partial def SExp.pretty : SExp → String
  where
   listElems : SExp → Option (List SExp)
   | .atom "List.nil" => some []
+  | .list [.atom "as", x, _] => listElems x
   | .list [.atom "List.cons", h, t] => (h :: ·) <$> listElems t
   | _ => none
 

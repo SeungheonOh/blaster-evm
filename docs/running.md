@@ -18,6 +18,15 @@ SMT query (default 900 seconds).
 Avoid `lake build Examples` and `lake test`: lake checks all files of a library at once,
 each with its own Z3 processes.
 
+## Annotated Solidity
+
+```bash
+./blaster-evm examples/
+```
+
+proves the UAL annotations of the Solidity files (see [annotations.md](annotations.md)),
+under the same limits and lock.
+
 ## One file
 
 With a timeout per SMT query:

@@ -7,3 +7,7 @@ import EvmBlaster.Spec
 import EvmBlaster.Command
 import EvmBlaster.Solidity
 import EvmBlaster.Trace
+import EvmBlaster.Sol
+import EvmBlaster.Replay
+import EvmBlaster.Keccak
+import EvmBlaster.Hashes

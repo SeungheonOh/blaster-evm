@@ -23,6 +23,7 @@ if [ ${#files[@]} -eq 0 ]; then
     tests/Tests/Codegen/Packed.lean tests/Tests/Codegen/Signed.lean
     tests/Tests/Codegen/Messages.lean tests/Tests/Codegen/Dynamic.lean
     tests/Tests/Codegen/Caller.lean tests/Tests/Codegen/Loop.lean
+    tests/Tests/UAL/Frontend.lean
     EvmBlaster/Examples/Config.lean EvmBlaster/Examples/Vault.lean
     EvmBlaster/Examples/VaultBuggy.lean EvmBlaster/Examples/Token.lean
     EvmBlaster/Examples/OZToken.lean EvmBlaster/Examples/WETH9.lean
@@ -34,7 +35,7 @@ fi
 
 echo "building dependencies..."
 acquire_check_lock
-limited lake build EvmBlaster Tests.Differential.Cases Tests.Support.Run Blaster:shared >/dev/null ||
+limited lake build EvmBlaster Tests.Differential.Cases Tests.Support.Run UAL blaster-evm Blaster:shared >/dev/null ||
   { echo "dependency build failed"; exit 1; }
 flock -u 9
 
@@ -51,6 +52,28 @@ for f in "${files[@]}"; do
   if [ $status -ne 0 ] || [ "$bad" -ne 0 ]; then failed=1; mark="FAIL"; else mark="ok"; fi
   printf '%-4s %-58s %3d passed %3d failed %5ds\n' "$mark" "$f" "$ok" "$bad" "$secs"
 done
+
+# The UAL annotations of the Solidity examples, end to end (./blaster-evm). Every property
+# is proved, but two in Crowdfund.sol, which has two deliberate bugs.
+if [ $all -eq 1 ]; then
+  log=.lake/check-logs/ual-examples.log
+  start=$(date +%s)
+  ./blaster-evm --no-cache examples/Bank.sol examples/Token.sol examples/Escrow.sol \
+    examples/Vesting.sol > "$log" 2>&1
+  status=$?
+  ./blaster-evm --no-cache --json examples/Crowdfund.sol > "$log.json" 2>> "$log"
+  cstatus=$?
+  secs=$(( $(date +%s) - start ))
+  ok=$(grep -c "✓" "$log")
+  bad=$(grep -cE "✗|^ *[!?] " "$log")
+  cproved=$(grep -c '"status": "proved"' "$log.json")
+  cfalse=$(grep -c '"status": "falsified"' "$log.json")
+  if [ $status -ne 0 ] || [ $cstatus -ne 1 ] || [ "$cproved" -ne 4 ] || [ "$cfalse" -ne 2 ]; then
+    failed=1; mark="FAIL"
+  else mark="ok"; fi
+  printf '%-4s %-58s %3d passed %3d failed %5ds\n' "$mark" "UAL examples (./blaster-evm examples/)" \
+    $((ok + cproved + cfalse)) "$bad" "$secs"
+fi
 
 # Conformance with the Ethereum test suites, when their fixtures have been fetched.
 if [ $all -eq 1 ]; then

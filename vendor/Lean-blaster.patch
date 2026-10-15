@@ -691,7 +691,7 @@ index 0e673ed..d6e61df 100644
         let (op1, op2) := reorderNatOp args
         return #[op1, op2]
 diff --git a/Blaster/Smt/Env.lean b/Blaster/Smt/Env.lean
-index 2f2f736..3ad9e38 100644
+index 2f2f736..89c9869 100644
 --- a/Blaster/Smt/Env.lean
 +++ b/Blaster/Smt/Env.lean
 @@ -465,6 +465,46 @@ def defineNatPow : TranslateEnvT Unit := do
@@ -741,7 +741,7 @@ index 2f2f736..3ad9e38 100644
  
  /-- Define Int.toNat Smt function, i.e.,
       Int.toNat x := (ite (<= 0 x) x else 0)
-@@ -490,6 +530,94 @@ def evalTerm (t : SmtTerm) : TranslateEnvT String := do
+@@ -490,6 +530,96 @@ def evalTerm (t : SmtTerm) : TranslateEnvT String := do
    submitCommand (.evalTerm t)
    getOutputEval p.stdout
  
@@ -766,6 +766,7 @@ index 2f2f736..3ad9e38 100644
 +partial def SExp.pretty : SExp → String
 +  | .atom "List.nil" => "[]"
 +  | .atom s => s
++  | .list [.atom "as", x, _] => x.pretty
 +  | e@(.list xs) =>
 +    match listElems e with
 +    | some es => "[" ++ ", ".intercalate (es.map SExp.pretty) ++ "]"
@@ -773,6 +774,7 @@ index 2f2f736..3ad9e38 100644
 + where
 +  listElems : SExp → Option (List SExp)
 +  | .atom "List.nil" => some []
++  | .list [.atom "as", x, _] => listElems x
 +  | .list [.atom "List.cons", h, t] => (h :: ·) <$> listElems t
 +  | _ => none
 +
@@ -836,7 +838,7 @@ index 2f2f736..3ad9e38 100644
  /-- Try to retrieve the model when a `sat` result is obtained and dump result to stdout.
      Do nothing when:
        - No solver instance is defined
-@@ -514,9 +642,66 @@ def getModel : TranslateEnvT (List String) := do
+@@ -514,9 +644,66 @@ def getModel : TranslateEnvT (List String) := do
      -- We therefore need to traverse the list in reverse order to
      -- properly display cex in the right order
      let cexArray ← Array.foldlM (λ acc vars => genCexAtStep acc vars) #[] topVars
@@ -904,7 +906,7 @@ index 2f2f736..3ad9e38 100644
      genCexAtStep (cex : Array String) (vars : List (SmtSymbol × Name)) : TranslateEnvT (Array String) := do
        List.foldrM (λ v acc => return acc.push (← getVarValue v)) cex vars
  
-@@ -604,6 +789,12 @@ def setProduceProofs (b : Bool) : TranslateEnvT Unit :=
+@@ -604,6 +791,12 @@ def setProduceProofs (b : Bool) : TranslateEnvT Unit :=
  def setProduceModels (b : Bool) : TranslateEnvT Unit :=
    trySubmitCommand! (.setOption ":produce-models" (toString b))
  
@@ -917,7 +919,7 @@ index 2f2f736..3ad9e38 100644
  /-- Set Smt `smt.mbqi` option to `b`. -/
  def setMbqi (b : Bool) : TranslateEnvT Unit :=
    trySubmitCommand! (.setOption ":smt.mbqi" (toString b))
-@@ -667,6 +858,7 @@ def setTimeout : TranslateEnvT Unit := do
+@@ -667,6 +860,7 @@ def setTimeout : TranslateEnvT Unit := do
  def setDefaultSmtOptions (sOpts : BlasterOptions) : TranslateEnvT Unit := do
   setPrintSuccess true
   setProduceModels true
@@ -1064,15 +1066,6 @@ index 3f1a267..9eff5c9 100644
  
      | Expr.mdata .. => -- case when f is defined as a ctor argument and is used in a ctor proposition
          match toTaggedCtorSelector? f with
-diff --git a/Tests/Smt/SmtNat.lean b/Tests/Smt/SmtNat.lean
-index 41b6ad2..9f40583 100644
---- a/Tests/Smt/SmtNat.lean
-+++ b/Tests/Smt/SmtNat.lean
-@@ -5,3 +5,4 @@ import Tests.Smt.SmtNat.SmtNatMod
- import Tests.Smt.SmtNat.SmtNatMul
- import Tests.Smt.SmtNat.SmtNatPow
- import Tests.Smt.SmtNat.SmtNatSub
-+import Tests.Smt.SmtNat.SmtNatBitwise
 diff --git a/Tests/Smt/SmtNat/SmtNatBitwise.lean b/Tests/Smt/SmtNat/SmtNatBitwise.lean
 new file mode 100644
 index 0000000..0e03b98
@@ -1222,3 +1215,12 @@ index 0000000..0e03b98
 +#blaster (gen-cex: 0) (solve-result: 1) [∀ (x : Nat), x &&& 0xff00 = x % 65536]
 +
 +end Test.SmtNatBitwise
+diff --git a/Tests/Smt/SmtNat.lean b/Tests/Smt/SmtNat.lean
+index 41b6ad2..9f40583 100644
+--- a/Tests/Smt/SmtNat.lean
++++ b/Tests/Smt/SmtNat.lean
+@@ -5,3 +5,4 @@ import Tests.Smt.SmtNat.SmtNatMod
+ import Tests.Smt.SmtNat.SmtNatMul
+ import Tests.Smt.SmtNat.SmtNatPow
+ import Tests.Smt.SmtNat.SmtNatSub
++import Tests.Smt.SmtNat.SmtNatBitwise

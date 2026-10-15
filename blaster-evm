@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# blaster-evm: prove the UAL annotations of Solidity contracts (see docs/annotations.md).
+#
+# Builds the tool and the Lean libraries it uses when they are out of date (under the
+# memory and CPU limits of scripts/limits.sh), then runs it: `./blaster-evm FILE.sol`.
+set -euo pipefail
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+exe="$root/.lake/build/bin/blaster-evm"
+lib="$root/vendor/Lean-blaster/.lake/build/lib/libBlaster.so"
+
+# out of date: no executable, or a Lean source newer than it
+stale=0
+if [ ! -x "$exe" ] || [ ! -f "$lib" ] || [ ! -f "$root/.lake/build/lib/lean/UAL.olean" ]; then
+  stale=1
+elif [ -n "$(find "$root/UAL" "$root/UAL.lean" "$root/EvmBlaster" "$root/EvmBlaster.lean" \
+             "$root/vendor/Lean-blaster/Blaster" "$root/lakefile.lean" \
+             -newer "$exe" -name '*.lean' -print -quit 2>/dev/null)" ]; then
+  stale=1
+fi
+if [ $stale -eq 1 ]; then
+  (
+    set +e  # the cleanup trap of scripts/limits.sh must not abort the subshell
+    cd "$root"
+    source scripts/limits.sh
+    CHECK_RUNTIME="${CHECK_RUNTIME:-7200}"
+    acquire_check_lock
+    echo "blaster-evm: building the tool (first run or sources changed)…" >&2
+    log="$root/.lake/blaster-evm-build.log"
+    mkdir -p "$root/.lake"
+    if ! limited lake build blaster-evm UAL Blaster:shared > "$log" 2>&1; then
+      grep -E "error" "$log" | head -20 >&2
+      echo "blaster-evm: the build failed (log: $log)" >&2
+      exit 2
+    fi
+    touch "$exe"
+  ) || exit $?
+fi
+
+sysroot="$(cd "$root" && lean --print-prefix)"
+BLASTER_EVM_ROOT="$root" LEAN_SYSROOT="$sysroot" exec "$exe" "$@"

@@ -8,3 +8,4 @@ import Tests.Codegen.Messages
 import Tests.Codegen.Dynamic
 import Tests.Codegen.Caller
 import Tests.Codegen.Loop
+import Tests.UAL.Frontend

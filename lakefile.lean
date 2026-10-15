@@ -27,6 +27,15 @@ lean_lib «Tests» where
   srcDir := "tests"
   roots := #[`Tests]
 
+-- The UAL front end for Solidity: annotation syntax, the EVM ledger API, the `#ual_property`
+-- command, and the `blaster-evm` driver (see docs/annotations.md).
+lean_lib «UAL» where
+  roots := #[`UAL]
+
+lean_exe «blaster-evm» where
+  root := `UAL.Driver.Main
+  supportInterpreter := true
+
 -- Conformance with the Ethereum test suites (see docs/testing.md).
 lean_lib «Conformance» where
   srcDir := "tests"
