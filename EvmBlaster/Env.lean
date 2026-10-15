@@ -115,7 +115,7 @@ deriving Repr, Inhabited
 The chain state an execution depends on is a function `world : Query → Nat` answering
 every query. An execution is a function of its `Env` and its world, and theorems quantify
 over both. Assumptions about the chain state are hypotheses constraining the world, e.g.
-`World.KeccakInjective world` or "the `0`-th call succeeds". Outgoing calls are answered by
+"hashes do not land on the low slots" (`World.KeccakAbove`) or "the `0`-th call succeeds". Outgoing calls are answered by
 the world rather than executed: callees do not re-enter the contract and do not send Ether
 back to it during the call.
 
@@ -136,21 +136,14 @@ def withStorage (w : Query → Nat) (σ : Nat → Nat) : Query → Nat
 /-- Every answer is a word. -/
 def WF (w : Query → Nat) : Prop := ∀ q, w q < U256
 
-/-- Idealised collision resistance of keccak256 on inputs of the same length. -/
-def KeccakInjective (w : Query → Nat) : Prop :=
-  ∀ n ws ws', w (.keccak n ws) = w (.keccak n ws') → ws = ws'
-
 /-- Hashes never land below `bound`, i.e. on the slots of plain state variables. -/
 def KeccakAbove (w : Query → Nat) (bound : Nat) : Prop :=
   ∀ n ws, bound ≤ w (.keccak n ws)
 
-/-- Hashes of distinct inputs are at least `d` apart, and at least `d` below `2^256`: the
-    `d` consecutive slots of a struct stored at a hash (Solidity's layout for structs in
-    mappings) never meet another hashed slot, and never wrap around. -/
-def KeccakSpread (w : Query → Nat) (d : Nat) : Prop :=
-  (∀ n ws n' ws', (n ≠ n' ∨ ws ≠ ws') →
-    w (.keccak n ws) + d ≤ w (.keccak n' ws') ∨ w (.keccak n' ws') + d ≤ w (.keccak n ws)) ∧
-  ∀ n ws, w (.keccak n ws) + d ≤ U256
+/- There is deliberately no global injectivity of keccak256 here: with every answer a word
+   (`WF`), an injective keccak256 on all inputs is contradictory, and theorems assuming it
+   are vacuous. Collision freedom is assumed for the hashes involved instead
+   (`Evm.HashesFree`, `Evm.CollisionFree` in `EvmBlaster/Hashes.lean`). -/
 
 end World
 

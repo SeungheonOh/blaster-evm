@@ -128,7 +128,8 @@ def Out.clear (o : Out) : IO Unit := do
     o.status.set false
 
 def Out.line (o : Out) (s : String := "") : IO Unit := do
-  if o.json then return
+  -- with --json the report goes to standard error, the JSON to standard output
+  if o.json then IO.eprintln s; return
   o.clear
   IO.println s
   (← IO.getStdout).flush

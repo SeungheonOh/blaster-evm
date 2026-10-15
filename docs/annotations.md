@@ -63,7 +63,7 @@ for how long.
 
 Options: `--only NAME` (properties whose name, or `Contract.name`, contains NAME;
 repeatable), `--timeout S` (solver timeout per property, default 120), `--no-cache`,
-`--json` (results as JSON on standard output), `--mem 8G` and `--cpu 400%` (limits of each
+`--json` (results as JSON on standard output, the report on standard error), `--mem 8G` and `--cpu 400%` (limits of each
 check), `-v` (show the Lean commands and their output).
 
 The exit status is 0 when every property is proved, 1 when some property is falsified,

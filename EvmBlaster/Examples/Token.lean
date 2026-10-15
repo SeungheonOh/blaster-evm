@@ -9,9 +9,9 @@ import Blaster
 machine obtains from the world as `world (.keccak 64 [a, 0])`.
 
 keccak256 is uninterpreted, so properties relating different balances need assumptions
-about it: injectivity (distinct holders have distinct slots) and that hashes do not hit
-the slots of `totalSupply` and `minter`. These are the standard idealisations of
-collision resistance, stated as hypotheses on the world.
+about it: that the hashes involved do not collide (distinct holders have distinct slots:
+`HashesFree`, over the hashes the call computes and those the statement reads) and that
+hashes do not hit the slots of `totalSupply` and `minter` (`World.KeccakAbove`).
 -/
 
 namespace Examples.Token
@@ -50,32 +50,32 @@ theorem minter_immutable (env : Env) (world : Query → Nat) :
 
 /-- Funds only move with the holder's authorisation: nobody but `a` can decrease
     `balanceOf[a]`. -/
-theorem only_holder_decreases_balance (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world →
-    World.KeccakInjective world → World.KeccakAbove world 3 →
+theorem only_holder_decreases_balance (env : Env) (world : Query → Nat) (a : Nat) :
+    env.WF → World.WF world → World.KeccakAbove world 3 → a < U160 →
+    HashesFree Token env world 3000 1 [mapKey 0 a] →
     (execute Token env world 3000).onSuccess (fun f =>
-      ∀ a, a < U160 → balance' world f a < balance world a → env.msg.caller = a) := by
+      balance' world f a < balance world a → env.msg.caller = a) := by
   blaster
 
 /-- `transfer(to, amount)` moves exactly `amount` from the caller to `to` and touches no
     other balance. -/
-theorem transfer_conserves (env : Env) (world : Query → Nat) (to amount : Nat) :
-    env.WF → World.WF world →
-    World.KeccakInjective world → World.KeccakAbove world 3 →
+theorem transfer_conserves (env : Env) (world : Query → Nat) (to amount a : Nat) :
+    env.WF → World.WF world → World.KeccakAbove world 3 →
     env.msg.calldata = .ofAbi 0xa9059cbb [to, amount] →
     env.msg.caller ≠ to →
+    HashesFree Token env world 3000 1 [mapKey 0 env.msg.caller, mapKey 0 to, mapKey 0 a] →
     (execute Token env world 3000).onSuccess (fun f =>
       balance' world f env.msg.caller + balance' world f to =
         balance world env.msg.caller + balance world to ∧
       balance' world f env.msg.caller = balance world env.msg.caller - amount ∧
-      ∀ a, a < U160 → a ≠ env.msg.caller → a ≠ to → balance' world f a = balance world a) := by
+      (a < U160 → a ≠ env.msg.caller → a ≠ to → balance' world f a = balance world a)) := by
   blaster
 
 /-- `transfer` succeeds whenever the caller has the funds and the recipient's balance does
     not overflow. -/
 theorem transfer_succeeds (env : Env) (world : Query → Nat) (to amount : Nat) :
-    env.WF → World.WF world →
-    World.KeccakInjective world → World.KeccakAbove world 3 →
+    env.WF → World.WF world → World.KeccakAbove world 3 →
+    HashesFree Token env world 3000 1 [mapKey 0 env.msg.caller, mapKey 0 to] →
     env.msg.calldata = .ofAbi 0xa9059cbb [to, amount] →
     env.msg.callvalue = 0 →
     to < U160 → env.msg.caller ≠ to →
@@ -101,5 +101,16 @@ statement is falsified.) -/
     env.WF → World.WF world → World.KeccakAbove world 3 →
     (execute Token env world 3000).onSuccess (fun f =>
       ∀ a, a < U160 → balance' world f a < balance world a → env.msg.caller = a)]
+
+/-! ### The assumptions are consistent
+
+`False` does not follow from them: Blaster finds a chain state satisfying all of them, so
+the theorems above are not vacuously true. -/
+
+#blaster (solve-result: 1) [∀ (env : Env) (world : Query → Nat) (to amount a : Nat),
+    env.WF → World.WF world → World.KeccakAbove world 3 →
+    env.msg.calldata = .ofAbi 0xa9059cbb [to, amount] → env.msg.caller ≠ to →
+    HashesFree Token env world 3000 1 [mapKey 0 env.msg.caller, mapKey 0 to, mapKey 0 a] →
+    False]
 
 end Examples.Token

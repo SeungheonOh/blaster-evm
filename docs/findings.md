@@ -12,6 +12,14 @@
   theorem, and several examples show why they matter: without the keccak assumptions,
   without `BalancesBounded` on WETH9, or with a dirty `dst` address, Blaster finds
   counterexamples (or fails to prove the statement) for reasons that are real.
+- **Assumptions must be checked for consistency.** The examples first assumed keccak256
+  injective on all inputs (`KeccakInjective`), with its answers 256-bit words
+  (`World.WF`). Together these are contradictory (there are more inputs than outputs), so
+  every theorem assuming both was vacuously true, whatever the code. They now assume collision freedom only of the hashes involved, the hashes the
+  call computes (`hashesOf`) and those the statement reads (`HashesFree`), which is
+  consistent, and each such file checks that its assumptions are satisfiable (Blaster
+  finds a model of them). The theorems were re-proved under the weaker assumption. The UAL
+  front end adds the same assumption automatically.
 - **It finds real bugs.** In the Solidity documentation's `SimpleAuction`, bidding and
   ending overlap at `block.timestamp == auctionEndTime`: a bid can be accepted after the
   auction has paid out (see [examples.md](examples.md)). The counterexample to exact

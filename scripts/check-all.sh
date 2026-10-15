@@ -66,8 +66,8 @@ if [ $all -eq 1 ]; then
   secs=$(( $(date +%s) - start ))
   ok=$(grep -c "✓" "$log")
   bad=$(grep -cE "✗|^ *[!?] " "$log")
-  cproved=$(grep -c '"status": "proved"' "$log.json")
-  cfalse=$(grep -c '"status": "falsified"' "$log.json")
+  cproved=$(grep -c '^  "status": "proved"' "$log.json")
+  cfalse=$(grep -c '^  "status": "falsified"' "$log.json")
   if [ $status -ne 0 ] || [ $cstatus -ne 1 ] || [ "$cproved" -ne 4 ] || [ "$cfalse" -ne 2 ]; then
     failed=1; mark="FAIL"
   else mark="ok"; fi

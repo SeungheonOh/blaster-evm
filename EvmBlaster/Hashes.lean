@@ -67,4 +67,15 @@ def HashesFree (c : Contract) (env : Env) (world : Query → Nat) (fuel gap : Na
     (extra : List HashInput) : Prop :=
   CollisionFree world gap (extra ++ hashesOf c env world fuel)
 
+theorem CollisionFree.of_append {world : Query → Nat} {gap : Nat} :
+    ∀ {xs ys : List HashInput}, CollisionFree world gap (xs ++ ys) → CollisionFree world gap ys
+  | [], _, h => h
+  | _ :: xs, _, h => CollisionFree.of_append (xs := xs) h.2.2
+
+/-- The hashes of the call alone do not collide. -/
+theorem HashesFree.call {c : Contract} {env : Env} {world : Query → Nat} {fuel gap : Nat}
+    {extra : List HashInput} (h : HashesFree c env world fuel gap extra) :
+    HashesFree c env world fuel gap [] :=
+  CollisionFree.of_append h
+
 end Evm

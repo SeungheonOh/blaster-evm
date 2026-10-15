@@ -15,7 +15,10 @@ In [`examples/`](../examples), proved with `./blaster-evm` (see
 
 ## Lean
 
-Every theorem is about compiled bytecode, never the Solidity source. The proofs are in
+Every theorem is about compiled bytecode, never the Solidity source. Theorems relating
+hashed storage slots assume collision freedom of the hashes involved (`HashesFree`), and
+each such file checks that its assumptions are satisfiable (see
+[findings.md](findings.md)). The proofs are in
 [`EvmBlaster/Examples/`](../EvmBlaster/Examples), the contracts in
 [`contracts/`](../contracts). Times are wall-clock per file on one machine.
 
@@ -25,12 +28,12 @@ Every theorem is about compiled bytecode, never the Solidity source. The proofs 
 | [`Vault`](../contracts/Vault.sol) | solc 0.8.28 | Ether leaves only towards the beneficiary, only after the deadline, at most one call per transaction; the deadline only moves forward and only by the owner; roles are immutable; balance accounting; the beneficiary *can* withdraw (liveness, assuming the recipient accepts the transfer) | 32 s |
 | [`Token`](../contracts/Token.sol) | solc 0.8.28 | only the minter changes the supply; the minter is immutable; only the holder decreases a balance; `transfer` conserves and touches nothing else; `transfer` succeeds when funded; and the keccak assumptions are *needed* (counterexamples without them) | 6 s |
 | [`VaultBuggy`](../contracts/VaultBuggy.sol) | solc 0.8.28 | Blaster finds the `tx.origin` phishing attack and the deadline-shortening bug as counterexamples | 2 s |
-| **WETH9** ([source](../contracts/mainnet/WETH9.sol.txt)) | **deployed mainnet bytecode** (solc 0.4, 2017) | Ether leaves only towards the caller and is burned from the caller's WETH balance; incoming Ether is credited; nobody debits an account except its holder or a spender within its allowance, which is consumed; allowances change only by their owner or spender; `transfer` conserves; withdrawals succeed | 367 s |
-| [`OZToken`](../contracts/OZToken.sol) | OpenZeppelin v5.1.0 ERC20 + Ownable, solc 0.8.28 | only the owner changes the supply or the owner; after renouncing, the supply is fixed forever; only the holder or a spender within its allowance debits an account; `transfer` and `approve` are exact | 27 s |
+| **WETH9** ([source](../contracts/mainnet/WETH9.sol.txt)) | **deployed mainnet bytecode** (solc 0.4, 2017) | Ether leaves only towards the caller and is burned from the caller's WETH balance; incoming Ether is credited; nobody debits an account except its holder or a spender within its allowance, which is consumed; allowances change only by their owner or spender; `transfer` conserves; withdrawals succeed | 121 s |
+| [`OZToken`](../contracts/OZToken.sol) | OpenZeppelin v5.1.0 ERC20 + Ownable, solc 0.8.28 | only the owner changes the supply or the owner; after renouncing, the supply is fixed forever; only the holder or a spender within its allowance debits an account; `transfer` and `approve` are exact | 41 s |
 | [`Timelock`](../contracts/Timelock.sol) | solc 0.8.28 | the fee changes only when a queued change is due, and only to the queued value; only the admin queues; a change becomes executable exactly 2 days after it is queued; the fee stays within its cap; anyone can apply a due change; **over any sequence of calls without the admin, the fee keeps its value or takes the one already queued** (Lean induction) | 4 s |
-| [`Auction`](../contracts/Auction.sol) | the Solidity documentation's `SimpleAuction`, solc 0.8.28 | Ether leaves only as the final payment to the beneficiary or as the caller's own refund; settings are fixed; bids are genuine; refunds succeed; a boundary bug (below) | 5 s |
-| [`MultiSig`](../contracts/MultiSig.sol) | solc 0.8.28 | Ether leaves only through `execute`, to the recorded recipient with the recorded value, after two recorded confirmations; only owners confirm, for themselves; an executed transaction stays executed; confirmation counters stay exact; **from deployment, over any sequence of calls, every payment was confirmed by two distinct owners** (Lean induction) | 477 s |
-| [`OZPausableToken`](../contracts/OZPausableToken.sol) | OpenZeppelin v5.1.0 ERC20 + Pausable + AccessControl, solc 0.8.28 | while paused, no balance and not the supply changes; only `PAUSER_ROLE` holders pause or unpause; only `MINTER_ROLE` holders mint; roles change only through the role's admin, or by renouncing; a pauser can always unpause | 417 s |
+| [`Auction`](../contracts/Auction.sol) | the Solidity documentation's `SimpleAuction`, solc 0.8.28 | Ether leaves only as the final payment to the beneficiary or as the caller's own refund; settings are fixed; bids are genuine; refunds succeed; a boundary bug (below) | 8 s |
+| [`MultiSig`](../contracts/MultiSig.sol) | solc 0.8.28 | Ether leaves only through `execute`, to the recorded recipient with the recorded value, after two recorded confirmations; only owners confirm, for themselves; an executed transaction stays executed; confirmation counters stay exact; **from deployment, over any sequence of calls, every payment was confirmed by two distinct owners** (Lean induction) | 319 s |
+| [`OZPausableToken`](../contracts/OZPausableToken.sol) | OpenZeppelin v5.1.0 ERC20 + Pausable + AccessControl, solc 0.8.28 | while paused, no balance and not the supply changes; only `PAUSER_ROLE` holders pause or unpause; only `MINTER_ROLE` holders mint; roles change only through the role's admin, or by renouncing; a pauser can always unpause | 84 s |
 
 ## Findings
 

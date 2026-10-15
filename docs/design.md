@@ -43,13 +43,19 @@ hypotheses about the world. The examples use, for instance:
 | Assumption | Meaning |
 | --- | --- |
 | `World.WF world`, `env.WF` | every value is a 256-bit word, addresses are 160 bits |
-| `World.KeccakInjective`, `World.KeccakAbove 5` | idealised collision resistance; hashes avoid the low storage slots |
-| `World.KeccakSpread world 4` | hashes of distinct inputs are at least 4 slots apart: a struct stored in a mapping (4 slots in `MultiSig`) never meets another hashed slot |
+| `HashesFree c env world fuel gap extra` | idealised collision resistance: the hashes the call computes (`hashesOf`) and the hashes `extra` the statement reads are pairwise distinct, and at least `gap` slots apart for structs stored in mappings (4 in `MultiSig`) |
+| `World.KeccakAbove world 5` | hashes avoid the low storage slots |
 | `world (.callSuccess 0) ≠ 0` | the first outgoing call succeeds (e.g. the recipient is an EOA) |
 | `Mainnet world`, `Deployed world` | the name and symbol slots hold what the constructor (or mainnet) stored |
 | `BalancesBounded`, `SupplyBacked` | invariants of the contract assumed of the pre-state (balances backed by the Ether supply; balances sum to the total supply) |
 | `EndedInThePast` (`Auction`) | reachability: an ended auction is only called at or after its end time, since block timestamps never decrease |
 | `kec tx.2 = H` for every call (`MultiSig`) | across a sequence of transactions, keccak256 is one and the same function |
+
+Collision freedom is assumed only for the hashes involved, never for keccak256 as a
+whole: with every answer a 256-bit word, an injective keccak256 on all inputs is
+contradictory (there are more inputs than outputs), and a theorem assuming it would be
+vacuously true. The example files that assume it end with a check that their assumptions are
+satisfiable (`#blaster (solve-result: 1)` on "the assumptions imply `False`").
 
 Outgoing calls are answered, not executed: the model assumes callees do not re-enter the
 contract.

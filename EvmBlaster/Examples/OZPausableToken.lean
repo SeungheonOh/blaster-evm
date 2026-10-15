@@ -55,20 +55,28 @@ def flag (v : Nat) : Prop := v % 256 ≠ 0
 /-- `a` holds role `r` at the start of the call. -/
 def HasRole (world : Query → Nat) (r a : Nat) : Prop := flag (World.storage world (roleSlot world r a))
 
+/-- The hashes of the call and `extra` (the entries a statement reads) do not collide, and
+    are 2 apart (`RoleData` is a 2-slot struct stored in a mapping). -/
+abbrev Hashes (env : Env) (world : Query → Nat) (extra : List HashInput) : Prop :=
+  HashesFree OZPausableToken env world 5000 2 extra
+
+/-- The keccak256 inputs locating `hasRole[r][a]` (and the role's admin). -/
+def roleKeys (world : Query → Nat) (r a : Nat) : List HashInput := mapKey2 world 6 r a
+
 /-- While the token is paused, no balance and not the supply can change, whatever the call. -/
-theorem paused_freezes_balances (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 7 →
-    Deployed world →
+theorem paused_freezes_balances (env : Env) (world : Query → Nat) (a : Nat) :
+    env.WF → World.WF world → World.KeccakAbove world 7 →
+    Deployed world → Hashes env world [mapKey 0 a] →
     flag (World.storage world pausedSlot) →
     (execute OZPausableToken env world 5000).onSuccess (fun f =>
       f.sload world supplySlot = World.storage world supplySlot ∧
-      ∀ a, a < U160 → f.sload world (balanceSlot world a) = World.storage world (balanceSlot world a)) := by
+      (a < U160 → f.sload world (balanceSlot world a) = World.storage world (balanceSlot world a))) := by
   blaster
 
 /-- Only holders of `PAUSER_ROLE` pause or unpause. -/
 theorem only_pausers_pause (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 7 →
-    Deployed world →
+    env.WF → World.WF world → World.KeccakAbove world 7 →
+    Deployed world → Hashes env world (roleKeys world pauserRole env.msg.caller) →
     (execute OZPausableToken env world 5000).onSuccess (fun f =>
       (flag (f.sload world pausedSlot) ↔ ¬ flag (World.storage world pausedSlot)) →
         HasRole world pauserRole env.msg.caller) := by
@@ -76,8 +84,8 @@ theorem only_pausers_pause (env : Env) (world : Query → Nat) :
 
 /-- Only holders of `MINTER_ROLE` change the supply (there is no burning). -/
 theorem only_minters_mint (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 7 →
-    Deployed world →
+    env.WF → World.WF world → World.KeccakAbove world 7 →
+    Deployed world → Hashes env world (roleKeys world minterRole env.msg.caller) →
     (execute OZPausableToken env world 5000).onSuccess (fun f =>
       f.sload world supplySlot ≠ World.storage world supplySlot →
         HasRole world minterRole env.msg.caller ∧
@@ -86,11 +94,12 @@ theorem only_minters_mint (env : Env) (world : Query → Nat) :
 
 /-- Roles change only through the role's admin, except that anyone may renounce a role
     they hold. -/
-theorem roles_change_through_admin (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 7 →
-    Deployed world →
+theorem roles_change_through_admin (env : Env) (world : Query → Nat) (r a : Nat) :
+    env.WF → World.WF world → World.KeccakAbove world 7 →
+    Deployed world → r < U256 → a < U160 →
+    Hashes env world (roleKeys world r a ++
+      roleKeys world (World.storage world (adminRoleSlot world r)) env.msg.caller) →
     (execute OZPausableToken env world 5000).onSuccess (fun f =>
-      ∀ r a, r < U256 → a < U160 →
         (flag (f.sload world (roleSlot world r a)) ↔ ¬ HasRole world r a) →
         HasRole world (World.storage world (adminRoleSlot world r)) env.msg.caller ∨
         (a = env.msg.caller ∧ ¬ flag (f.sload world (roleSlot world r a)))) := by
@@ -98,12 +107,20 @@ theorem roles_change_through_admin (env : Env) (world : Query → Nat) :
 
 /-- Liveness: a pauser can always lift a pause. -/
 theorem pauser_can_unpause (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 7 →
-    Deployed world →
+    env.WF → World.WF world → World.KeccakAbove world 7 →
+    Deployed world → Hashes env world (roleKeys world pauserRole env.msg.caller) →
     env.msg.calldata = .ofAbi 0x3f4ba83a [] → env.msg.callvalue = 0 →
     HasRole world pauserRole env.msg.caller → flag (World.storage world pausedSlot) →
     (execute OZPausableToken env world 5000).succeedsWith (fun f =>
       ¬ flag (f.sload world pausedSlot)) := by
   blaster
+
+/-! ### The assumptions are consistent -/
+
+#blaster (solve-result: 1) [∀ (env : Env) (world : Query → Nat) (r a : Nat),
+    env.WF → World.WF world → World.KeccakAbove world 7 →
+    Deployed world → r < U256 → a < U160 →
+    Hashes env world (roleKeys world r a ++
+      roleKeys world (World.storage world (adminRoleSlot world r)) env.msg.caller) → False]
 
 end Examples.OZPausableToken

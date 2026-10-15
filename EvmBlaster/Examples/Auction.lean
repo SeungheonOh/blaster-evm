@@ -54,12 +54,21 @@ def EndedInThePast (env : Env) (world : Query → Nat) : Prop :=
   endedIn (World.storage world) → endTime world ≤ env.block.timestamp
 
 /-- Exact accounting for one call: the balance moves exactly as the obligations do, and
-    no other refund changes. If the contract held exactly what it owed, it still does. -/
-def ExactAccounting (env : Env) (world : Query → Nat) (f : Frame) : Prop :=
+    the refund of any other account `a` does not change. If the contract held exactly
+    what it owed, it still does. -/
+def ExactAccounting (env : Env) (world : Query → Nat) (a : Nat) (f : Frame) : Prop :=
   f.balance + owed world (World.storage world) env.msg.caller (highestBidder world) =
     env.balance + owed world (f.sload world) env.msg.caller (highestBidder world) ∧
-  ∀ a, a < U160 → a ≠ env.msg.caller → a ≠ highestBidder world →
-    f.sload world (pendingSlot world a) = World.storage world (pendingSlot world a)
+  (a < U160 → a ≠ env.msg.caller → a ≠ highestBidder world →
+    f.sload world (pendingSlot world a) = World.storage world (pendingSlot world a))
+
+/-- The hashes of the call (to contract `c`) and `extra` do not collide. -/
+abbrev Hashes (c : Contract) (env : Env) (world : Query → Nat) (extra : List HashInput) : Prop :=
+  HashesFree c env world 3000 1 extra
+
+/-- The refund entries exact accounting reads. -/
+def accountKeys (env : Env) (world : Query → Nat) (a : Nat) : List HashInput :=
+  [mapKey 4 env.msg.caller, mapKey 4 (highestBidder world), mapKey 4 a]
 
 /-! ### Both versions -/
 
@@ -67,7 +76,8 @@ def ExactAccounting (env : Env) (world : Query → Nat) (f : Frame) : Prop :=
     bidding time is over and before the auction is marked ended) or as a refund of exactly
     the caller's pending returns. -/
 theorem ether_out (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 6 →
+    env.WF → World.WF world → World.KeccakAbove world 6 →
+    Hashes Auction env world [mapKey 4 env.msg.caller] →
     (execute Auction env world 3000).onSuccess (fun f =>
       AllCalls (fun c => c.value ≠ 0 →
         (c.to = beneficiary world ∧ c.value = highestBid world ∧
@@ -96,7 +106,8 @@ theorem bids_are_real (env : Env) (world : Query → Nat) :
 
 /-- Liveness: an outbid bidder gets exactly their refund, if they accept the transfer. -/
 theorem refund_succeeds (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 6 →
+    env.WF → World.WF world → World.KeccakAbove world 6 →
+    Hashes Auction env world [mapKey 4 env.msg.caller] →
     env.msg.calldata = .ofAbi 0x3ccfd60b [] → env.msg.callvalue = 0 →
     env.msg.caller ≠ env.msg.address →
     World.storage world (pendingSlot world env.msg.caller) ≤ env.balance →
@@ -135,22 +146,24 @@ theorem late_bid_accepted (env : Env) (world : Query → Nat) :
 
 /-- That boundary is the only exception: exact accounting holds for every call unless the
     auction has ended and the call happens at exactly the end time. -/
-theorem accounting_except_at_end (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 6 →
+theorem accounting_except_at_end (env : Env) (world : Query → Nat) (a : Nat) :
+    env.WF → World.WF world → World.KeccakAbove world 6 →
+    Hashes Auction env world (accountKeys env world a) →
     env.msg.caller ≠ env.msg.address → beneficiary world ≠ env.msg.address →
     EndedInThePast env world →
     ¬ (endedIn (World.storage world) ∧ env.block.timestamp = endTime world) →
-    (execute Auction env world 3000).onSuccess (ExactAccounting env world) := by
+    (execute Auction env world 3000).onSuccess (ExactAccounting env world a) := by
   blaster
 
 /-! ### The fixed version -/
 
 /-- `AuctionFixed`: exact accounting for every call. -/
-theorem fixed_exact_accounting (env : Env) (world : Query → Nat) :
-    env.WF → World.WF world → World.KeccakInjective world → World.KeccakAbove world 6 →
+theorem fixed_exact_accounting (env : Env) (world : Query → Nat) (a : Nat) :
+    env.WF → World.WF world → World.KeccakAbove world 6 →
+    Hashes AuctionFixed env world (accountKeys env world a) →
     env.msg.caller ≠ env.msg.address → beneficiary world ≠ env.msg.address →
     EndedInThePast env world →
-    (execute AuctionFixed env world 3000).onSuccess (ExactAccounting env world) := by
+    (execute AuctionFixed env world 3000).onSuccess (ExactAccounting env world a) := by
   blaster
 
 /-- `AuctionFixed`: once ended, the result is final. -/
@@ -160,5 +173,13 @@ theorem fixed_result_final (env : Env) (world : Query → Nat) :
     (execute AuctionFixed env world 3000).onSuccess (fun f =>
       f.sload world 3 = highestBid world ∧ f.sload world 2 = World.storage world 2) := by
   blaster
+
+/-! ### The assumptions are consistent -/
+
+#blaster (solve-result: 1) [∀ (env : Env) (world : Query → Nat) (a : Nat),
+    env.WF → World.WF world → World.KeccakAbove world 6 →
+    Hashes Auction env world (accountKeys env world a) →
+    env.msg.caller ≠ env.msg.address → beneficiary world ≠ env.msg.address →
+    EndedInThePast env world → False]
 
 end Examples.Auction
